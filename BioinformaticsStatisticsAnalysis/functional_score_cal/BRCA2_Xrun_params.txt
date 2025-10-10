@@ -1,0 +1,8 @@
+
+exonsets=("15,16,17,18C,18N,19,20,21,22,23,24,25C,25N" "15_drug,16_drug,17_drug,18C_drug,18N_drug,19_drug,20_drug,21_drug,22_drug,23_drug,24_drug,25C_drug,25N_drug")
+loessSubsets=("allSNV") 
+##("Findlay" "ModFindlay" "ModFindlay2")
+EventCount_Filters=("libD510")
+Ratios=("D14vD5R")
+vsets=("allv")
+fcs=(1)
