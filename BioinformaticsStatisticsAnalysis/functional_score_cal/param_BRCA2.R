@@ -1,27 +1,27 @@
 #!/usr/local/biotools/r/R-4.2.2/bin/Rscript
 
 ## where the r file reside
-rpath <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Gilbert/Hypomorph_variants/rpgm/pipeline/"
+rpath <- "/rpath/rpgm/pipeline/"
 ### check here before rerun
 ## results path for Xexon
-res_path <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Gilbert/Hypomorph_variants/results/12_2024/pipeline/"
+res_path <- "/rpath/results/12_2024/pipeline/"
 ## Gene
 Gene <- "BRCA2"
 ## EventType file chunling provided (some of the variants were annotated differently from the results directly off bioinformatics pipeline)
-ETfile <- NULL ##"/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Chunling/BRCA2/data/10_2023_curation/chunling_ET.csv"
+ETfile <- NULL ##"
 ## exon with different replicates and pam site information
-datalist <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Gilbert/Hypomorph_variants/data/12_13_2024/exonDataList_121924.txt"
+datalist <- "rpath/exonDataList_121924.txt"
 ## target file so to control the region
-targetfile <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Gilbert/Hypomorph_variants/data/12_13_2024/chunling_target_ind_BRCA2_hypo.csv"
+targetfile <- "rpath/target_ind_BRCA2_hypo.csv"
 ## HDR files from lab
 HDRfile <- NULL
 ## variants to exclude from model building
 vexclude <- NULL
 ## clinvar file for model building
-clinvardir <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Chunling/BRCA2/data/10_2023_curation/"
+clinvardir <- NULL
 clinvarfile <- NULL
 ## dtdir where the xexon run to fetch individual exon results and individual report run output
-dtdir <- "/research/bsi/projects/breast/s108235.tripneg_Couch/projects/s108235.tripneg/breast_requests/Predisposition_genes/Gilbert/Hypomorph_variants/results/12_2024/pipeline/Ind_full/"
+dtdir <- "rpath/results/12_2024/pipeline/Ind_full/"
 ## intermediate path for xexon runs
 outdir <- paste0(res_path , "/xexon_inputfiles/")
 ## fn shortened file name for xexon results
