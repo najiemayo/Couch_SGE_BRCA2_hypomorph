@@ -1,6 +1,5 @@
-# Authors: Steven N. Hart, Rohan David Gnanaolivu, Yohannes A. Tecleab
-# Date: 7/9/2024
-# Site Saturation Mutagenesis protocols
+## Authors: Steven N. Hart, Rohan David Gnanaolivu, Yohannes A. Tecleab
+## Site Saturation Mutagenesis protocols
 
 This repository contains code for high throughput SSM experiments. There are 4 primary directories
 
