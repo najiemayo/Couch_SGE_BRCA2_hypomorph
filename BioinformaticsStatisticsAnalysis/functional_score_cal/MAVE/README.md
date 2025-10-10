@@ -1,2 +1,2 @@
 # MAVE
-version control of rscripts for MAVE projects
+main rscripts for MAVE projects
