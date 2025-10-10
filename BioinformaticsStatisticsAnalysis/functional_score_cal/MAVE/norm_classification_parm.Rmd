@@ -1,0 +1,3089 @@
+---
+author: 
+  "Jeanie Na"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+title    : "High throughput study analysis one experiment investigation"
+
+
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    theme: united
+    highlight: tango
+
+params:
+
+  Gene:
+    label: "Gene:"
+    value: "BRCA2"
+    input: text 
+  Output_dir:
+    label: "Output Dir:"
+    value: "/respath/03_21_2024/xexon_debug/"
+    input: text    
+       
+  Exons:
+    label: "Exons included:"
+    value: "15_set1,16,17,18C_bs,18N_bs,19,20,21_bs,22_set1,23,24,25C,25N,26_p3"
+    input: text   
+      
+  loessSubset:
+    label: "Loess Filter (keep):"
+    value: "ModFindlay"
+    choices: ["Findlay", "ModFindlay", "ModFindlay2", "Synonymous", "allSNV"]
+    input: select
+    
+  EventCount_Filter:
+    label: "EventCount Filter:"
+    value: "libD510"
+    choices: ["lib10", "libD510", "lib100", "libD5100"]
+    input: select
+  vset:
+    label: "Variant set:"
+    value: "SNV"
+    choices: ["allv", "SNV"]
+    input: select
+
+  Score_method:
+    label: "Score Method:"
+    value: "B"
+    choices: ["A", "B", "C", "D"]
+    input: select
+  fcs:
+    label: "filter FC:"
+    value: 1
+    choices: [1, 1.5]
+    input: select
+  Lab_curation:
+    label: "Lab Curattion:"
+    value: "No"
+    choices: ["Yes", "No"]
+    input: select
+  Ratio:
+    label: "Ratio:"
+    value: "D14vLib"
+    choices: ["D14vLib", "D14vD5R", "D14vD5L"]
+    input: select
+  MM:
+    label: "Mixture Model:"
+    value: "normal"
+    choices: ["Robust", "normal"]
+    input: select
+  Outlierremove:
+    label: "Outlierremove Method:"
+    value: "No"
+    choices: ["p1", "p2", "p5", "No"]
+    input: select
+  extraFilter:
+    label: "Supplementary filter:"
+    value: "Yes"
+    choices: ["Yes", "No"]
+    input: select
+  inputfile:
+    label: "Input files:"
+    value: "/respath/03_21_2024/xexon_inputfiles/BRCA2_SNV_15_set1,16,17,18C_bs,18N_bs,19,20,21_bs,22_set1,23,24,25C,25N,26_p3_D14vLib_ModFindlay_libD510_1.csv" 
+    input: text
+  vexclude:
+    label: "variable exlusion files:"
+    value: "/datapath/10_2023_curation/Varaints to be excluded when use MAVE internal control to build model.xlsx" 
+    choices: ["/datapath/10_2023_curation/Varaints to be excluded when use MAVE internal control to build model.xlsx",NULL] 
+    input: select
+  clinvarfile:
+    label: "Clinvar File:"
+    value: "/datapath/10_2023_curation/ClinVar_BRCA2_DBD_control_111523_nonsense_syn_missense_exclude_single.txt"
+    choices: ["/datapath/RAD51C_E2c&3_ClinVar Controls_012224.txt", "/datapath/10_2023_curation/ClinVar_BRCA2_DBD_control_111523_nonsense_syn.txt"]
+    input: select
+  HDRfile:
+    label: "HDR File:"
+    value: "/datapath/HDR_exclSPLICEhypo.xlsx"
+    choices: ["/datapath/HDR_exclSPLICEhypo.xlsx", NULL]
+    input: select
+  targetfile:
+    label: "Data input file:"
+    value: "/datapath/chunling_target_ind_BRCA2.csv"
+    choices: ["/datapath/chunling_target_ind_BRCA2.csv", "/datapath/10_2023_curation//chunling_target.csv", NULL] 
+    input: select
+  funR:
+    label: "functions.R:"
+    value: "./functions.R"
+---
+
+```{=html}
+
+<style type="text/css">
+.main-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+<link rel="stylesheet" type="text/css" href="http://cdn.datatables.net/1.10.5/css/jquery.dataTables.min.css">
+
+```{=html}
+<script type="text/javascript">
+  $(document).ready(function() {
+    $("table").DataTable();
+  } );
+</script>
+```
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+    
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+library(kableExtra)
+library(plotly)
+library(arsenal)
+library(boot)
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(readxl)
+library(tidyverse)
+library(threejs)
+library(pROC)
+
+source(params$funR)
+resdir <- params$Output_dir
+Score_method <- params$Score_method
+Lab_curation <- params$Lab_curation
+vset <- params$vset
+Exons <- params$Exons
+Ratio <- params$Ratio
+Gene <- params$Gene
+extraFilter <- params$extraFilter
+inputfile <- params$inputfile
+fc <- params$fcs
+HDRfile <- params$HDRfile
+```
+
+## Setting of this report
+
+Gene: `r  Gene`\
+Inputfile: `r params$inputfile`
+Exons included : `r Exons`\
+Outputdir: `r  resdir`\
+loessSubset:  `r params$loessSubset`\
+EventCount_Filter: `r params$EventCount_Filter`\
+vset: `r vset`\
+Score_method: `r Score_method`\
+Lab_curation: `r Lab_curation`\
+Ratio: `r Ratio`\
+Mixture Model: `r params$MM`\
+Outlierremove: `r params$Outlierremove`\
+clinvarfile: `r params$clinvarfile` \
+extraFilter:  `r params$extraFilter` \
+Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model: `r params$vexclude` \
+
+## Aim
+
+Apply Findlay methods on functional scores. `r Ratio`.
+
+```{r}
+if(!is.null(params$vexclude)){
+  Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model <- read_excel(params$vexclude)
+
+  Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model <- Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model %>% mutate(uPOS = paste(GRCh38Location-1, REF, ALT, sep = "_") )
+
+}
+                    
+```
+
+```{r}
+if(!is.null(params$HDRfile)){
+  if (grepl("\\.txt$", params$HDRfile)) {
+    # Read the file using read.table
+    HDR <- read.table(file = params$HDRfile, header = TRUE, sep = '\t')
+  } else {
+    HDR <- read_excel(params$HDRfile)
+  }
+  HDR <- HDR %>% unique()
+  
+  HDR$htype <- HDR$`HDR function`
+}
+
+```
+
+```{r readin, include=TRUE, warning=FALSE, message=FALSE}
+## read in data
+
+inputfiles <-  read_csv(params$inputfile)
+exons <- inputfiles$exon
+dt <- list()
+for(i in 1:length(exons)){
+  dti <- read_csv(paste0(inputfiles$dtdir[i], inputfiles$filenames[i]), num_threads = 1)
+  dt[[i]] <- dti 
+}
+
+```
+
+## Data
+
+This analysis does `r ifelse(Lab_curation == "Yes", "", "not" )` take Lab curation into account. 
+
+## Analysis Plan:
+
+0. Start with the adjusted ratio from each individual exon exploration. 
+
+1. run the pipeline with normalization within each exon and across exons including all lab curated and cleaned data files. Files used are `r inputfiles$dtdir`
+
+`r inputfiles$filenames`
+
+Reference Method
+
+589 Normalizing scores within and across exons  
+
+590 Position-adjusted log2 day 11 over library ratios were normalized first across exon
+
+591 replicates, and then across all exons assayed. Scores from within each replicate were linearly 
+
+592 scaled such that the median synonymous and median nonsense SNVs within the replicate were 
+
+593 set to the median synonymous and median nonsense SNV values averaged across replicate 
+
+594 experiments. The ensuing SNV scores for each replicate were then normalized across exons in 
+
+595 the same way by again using median synonymous and median nonsense SNVs.
+
+
+A. Within each exon:
+
+Positional adjusted D14vLib or D14vD5 ratios from within each replicate were linearly scaled such that the median synonymous and median nonsense SNVs within the replicate were set to the median synonymous and median nonsense SNV values averaged across replicate  experiments.
+
+B. Normalization across exons.
+
+The ensuing SNV scores for each replicate were then normalized across exons in  the same way by again using median synonymous and median nonsense SNVs.
+
+C. functional score
+
+Get the average functional score cross replicates.
+
+2. Then calculate both 95% confidence interval (CI) and 99% CI for all stop-gain variants based on the clean data (D8/D5 and D8_olaparib/D5); 95% CI and 99% CI for all synonymous variants based on the clean data (D8/D5 and D8_olaparib/D5). For missense variants, no CI calculation needed, only functional scores from D8/D5 and D8_olaparib/D5. Classify hypomorphs based on the 95% & 99% CI from stop-gains and synonymous.
+
+3. Calculate the p-values for the pairwise mean difference for the 3 categories as a group (between stop-gain vs hypomorphs, synonymous vs hypomorphs, stop-gain vs synonymous) for the no drug experiment and olaparib experiment. Then, once the pairwise mean differences are calculated within no-drug or olaparib experiment, compare the pairwise mean difference between no-drug experiment and olaparib experiment. 
+
+4 Added the mixture model part, also the posterior probability 1-99% 2-98% corresponding functional score. 
+
+```{r prepdt1}
+
+### this step is to create necessary columns
+## up to 6 replicates 
+## take care of this if more replicates
+getnreps <- function(names){
+  n <- ifelse(length(grep("R6",names))>0, 6,
+              ifelse(length(grep("R5",names))>0, 5,
+                     ifelse(length(grep("R4",names))>0, 4, 
+                        ifelse(length(grep("R3",names))>0, 3, 
+                            ifelse(length(grep("R2",names))>0, 2, 1)))))
+  n
+}
+
+nmax <- 0
+for(ei in 1:length(exons)){
+  dt[[ei]] <- dt[[ei]] %>% mutate(uPOS = paste(POS, REF, ALT, sep = "_"), Exon = exons[ei], AApos=as.numeric(AApos))
+  ## find out how many replicates
+  nr <- getnreps(colnames(dt[[ei]]))
+  if(nr > nmax){
+    nmax <- nr
+  }
+  ## create R1:Rn,  Ri_raw, Ri_loess from the right columns
+  for(i in 1:nr){
+    Ri <- paste0("R", i)
+    Ri_raw <- paste0("R", i, "_raw")
+    Ri_loess <- paste0("R", i, "_loess")
+      
+    if(Ratio == "D14vLib"){
+      Ri_ratio <- paste0("R", i, "_D14_lib")
+      ratio_adjusted_Ri <- paste0("D14_lib_ratio_adjusted_R", i) # use loess adjusted values as starting values
+    }else if(Ratio == "D14vD5L"){
+      Ri_ratio <- paste0("R", i, "_D14_D5")
+      ratio_adjusted_Ri <- paste0("D14_D5_ratio_adjusted_R", i) # use loess adjusted values as starting values
+    }else{
+      Ri_ratio <- paste0("R", i, "_D14_D5")
+      ratio_adjusted_Ri <- paste0("R", i, "_D14_D5") # use raw values as starting values
+    }
+    
+    dt[[ei]] <- dt[[ei]] %>% mutate(!!sym(Ri) := as.numeric(!!sym(ratio_adjusted_Ri))) %>% 
+        mutate(!!sym(Ri_raw) := as.numeric(!!sym(Ri_ratio)))%>% 
+        mutate(!!sym(Ri_loess) := as.numeric(!!sym(Ri)))
+  }
+  ## if there is lab curation do it here.
+  if(Lab_curation == "Yes"){ ## remove lab says exclude all after combination
+    if(Score_method == "A"){
+      dt[[ei]] <- dt[[ei]] %>% filter(!`lab CV A` %in% c("exclude all"))
+    }else if(Score_method == "B"){
+      dt[[ei]] <- dt[[ei]] %>% filter(!`lab CV B` %in% c("exclude all"))
+    }else if(Score_method == "C"){
+      dt[[ei]] <- dt[[ei]] %>% filter(!`lab CV C` %in% c("exclude all"))
+    }else{
+      dt[[ei]] <- dt[[ei]] %>% filter(!`lab CV D` %in% c("exclude all"))
+    }
+  }
+}
+ 
+```
+
+
+```{r prepdt2}
+## this step is to apply filtering based on score summarized, and apply extra Filter
+## first create the function to apply filtering for different score and different number of replicates
+## note: if there were only two reps, the name of the removeA, C, D columns are different
+## 
+
+prefilter <- function(data,extraFilter,Score_method = "A" ){
+  if(Score_method == "B"){
+    return(data)
+  }else{
+    nr <- getnreps(colnames(data))
+    ## create removes from the right columns
+    if(nr <3){
+      removecln <-  paste0("remove", Score_method)
+      data <- data %>% filter(!!sym(removecln) == FALSE)
+    }else{
+      for(i in 1:nr){
+        removeclni <- paste0("remove", Score_method,i)
+        Ri <- paste0("R",i)
+        if(length(which(data[, removeclni] ==TRUE)) > 0){
+          data[which(data[, removeclni] ==TRUE), Ri] <- NA
+        }
+      }
+    }
+    
+    if(extraFilter == "Yes" & Score_method == "A"){
+      ## remove variants if the mean differ from B if it is scoreA
+      data <- data %>% filter(abs(functional.scoreA-functional.scoreB) < fc)
+    }else if(extraFilter == "Yes" & Score_method == "C"){
+      data <- data %>% filter(abs(functional.scoreC-functional.scoreB) < fc)
+    }else{
+      data <- data
+    }
+    return(data)
+  }
+}
+
+for(ei in 1:length(exons)){
+  dt[[ei]] <- prefilter(dt[[ei]],extraFilter,Score_method)
+}
+```
+
+
+```{r prepdt3}
+## this step to gather the necessary information for output
+## Combine exons.
+colns <- c("Exon", "uPOS", "POS", "REF",                       
+"ALT", "AApos","AltAA", "AltCodon", "EventType", #"EventType2",  
+"RefAA", "RefCodon", "SpliceAI_ALLELE", "SpliceAI_DP_AG", "SpliceAI_DP_AL", "SpliceAI_DP_DG",  "SpliceAI_DP_DL", "SpliceAI_DS_AG",  "SpliceAI_DS_AL", "SpliceAI_DS_DG", "SpliceAI_DS_DL", "spliceR",  "R1", "R2", "R3", "R4", "R5", "R6", "functional.scoreA", "functional.scoreB",    "functional.scoreC", "functional.scoreD")
+
+## take care of this if number of replicates is more than 6.
+rawcolns <- c("uPOS", "Exon", "R1_lib", "R1_D5", "R1_D14", "R2_lib", "R2_D5","R2_D14", "R3_lib", "R3_D5",	"R3_D14",
+               "R4_lib", "R4_D5", "R4_D14",		"R5_lib", "R5_D5","R5_D14", "R6_lib", "R6_D5",	"R6_D14", 
+              "R1_raw", "R2_raw", "R3_raw", "R4_raw", "R5_raw", "R6_raw",
+              "R1_loess", "R2_loess", "R3_loess", "R4_loess",  "R5_loess", "R6_loess")
+
+rawcolns_num <- setdiff(rawcolns, c("uPOS", "Exon"))
+
+## subset to these columns only
+dt0 <- dt
+for(i in 1:length(exons)){
+  temp <- dt[[i]]
+  temp[,rawcolns_num[rawcolns_num %in% colnames(temp)]] <- apply(temp[, rawcolns_num[rawcolns_num %in% colnames(temp)]], 2, function(x) as.numeric(as.character(x))) ## make sure all these are numeric
+  dt0[[i]] <- temp
+  
+  dt0[[i]] <- temp[, rawcolns[rawcolns %in% colnames(temp)]]
+  dt[[i]] <- temp[, colns[colns %in% colnames(temp)]]
+}
+
+
+if(length(exons) > 1){
+  dt0 <- dplyr::bind_rows(dt0)
+  dt <- dplyr::bind_rows(dt)
+}else{
+  dt0 <- dt0[[1]]
+  dt <- dt[[1]]
+}
+```
+
+
+```{r prepdt4}
+## this step is to get the long format so that we can re-normalize within exon using score0
+## take care of this if number of replicates > 6
+if(nmax == 6){
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1, R2, R3, R4, R5, R6)
+}else if(nmax == 5){
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1, R2, R3, R4, R5)
+} else if(nmax == 4){
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1, R2, R3, R4)
+}else if(nmax == 3){ ## 3
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1, R2, R3)
+}else if(nmax == 2){ ## 2
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1, R2)
+}else{ ## 1
+  dt.long <- tidyr::gather(dt, key = "Experiment", value = "score0", R1)
+}
+
+dt.long$Experiment <- as.numeric(substr(dt.long$Experiment, 2, 2))
+dt.long$score0 <- as.numeric(dt.long$score0)
+
+mydt <- dt.long 
+
+```
+
+```{r prepdt5}
+## this step to add in Target information
+## within target region
+target <- read.csv(params$targetfile)
+## previously for BRCA2 target$Exon <- gsub("_sg.*_*", "", target$Exon), check if the target file need to be updated.
+target <- target %>% unique()
+
+mydt <- merge(mydt, target) %>% mutate(inTarget = ifelse(POS <= End & POS >= Start, TRUE, FALSE))
+
+```
+
+
+```{r normfuns, include=TRUE}
+## this step is to normalize score0 now to score1 (within exon), to score2 (xexon)
+##a = (Syn.Avg.med-StopGain.Avg.med)/(Syn.medi-StopGain.medi),b =Syn.Avg.med – a*Syn.medi 
+
+myscale <- function(x, Syn.Avg.med, StopGain.Avg.med, Syn.med1, StopGain.med1){
+  a <- (Syn.Avg.med-StopGain.Avg.med)/(Syn.med1-StopGain.med1)
+  b  <- Syn.Avg.med - a*Syn.med1
+  x2 <- a*x +b
+  return(x2)
+}
+
+norm_win_exon <- function(dt){ ## note: remove splice variants for calculation medians inside so to keep the splice variants later in the normalization.
+  dt.out <- NULL
+  
+  for (ei in unique(dt$Exon)){
+    dti <- dt %>% filter(Exon == ei)
+    dti.temp <- dti %>% ## remove variants in splicing region
+      filter(spliceR == FALSE) %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>%##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") )%>% 
+      filter(inTarget == TRUE) 
+    if(!is.null(params$vexclude)){
+      dti.temp <- dti.temp %>% filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+    }
+      
+    meds <- dti.temp %>% group_by(EventType, Experiment) %>%
+      dplyr::summarize(M = median(score0, na.rm=TRUE))
+    
+    meds2  <- meds %>%
+    group_by(EventType) %>%
+    dplyr::summarize(M2 = mean(M, na.rm=TRUE))
+    
+    dti$score1 <- NA
+    for(ri in 1:max(dt$Experiment)){
+      dti[dti$Experiment == ri, "score1"] <- myscale(x = dti[dti$Experiment == ri, "score0"],
+                                                                   Syn.Avg.med = meds2$M2[meds2$EventType == "Synonymous"],
+                                                                   StopGain.Avg.med = meds2$M2[meds2$EventType == "StopGain"],  
+                                                                   Syn.med1 =  meds$M[meds$EventType == "Synonymous" & meds$Experiment == ri],
+                                                                   StopGain.med1 = meds$M[meds$EventType == "StopGain" & meds$Experiment == ri])
+    }
+    dt.out <- rbind(dt.out, dti)
+  }
+  return(dt.out)
+}
+ 
+
+norm_x_exon <- function(dt){
+  dt.out <- dt
+  
+  dti.temp <- dt %>% ## remove variants in splicing region
+      filter(spliceR == FALSE) %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") )%>%
+    filter(inTarget == TRUE) 
+  if(!is.null(params$vexclude)){
+      dti.temp <- dti.temp %>% filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  meds <- dti.temp %>% group_by(Exon, EventType) %>%
+    dplyr::summarize(M = median(score1, na.rm=TRUE))
+  
+  meds2  <- meds %>%
+    group_by(EventType) %>%
+    dplyr::summarize(M2 = mean(M, na.rm=TRUE))
+  
+  dt.out$score2 <- NA
+  
+  for(ei in unique(dt$Exon)){
+    dt.out[dt.out$Exon == ei, "score2"] <- myscale(x = dt.out[dt.out$Exon == ei, "score1"],
+                                                                   Syn.Avg.med = meds2$M2[meds2$EventType == "Synonymous"],
+                                                                   StopGain.Avg.med = meds2$M2[meds2$EventType == "StopGain"],  
+                                                                   Syn.med1 =  meds$M[meds$EventType == "Synonymous" & meds$Exon == ei  ],
+                                                                   StopGain.med1 = meds$M[meds$EventType == "StopGain" & meds$Exon == ei])
+  }
+  
+  return(dt.out)
+}
+
+## mydt has every variants
+## mydt.snv has only SNVs in Target
+## for summary numbers only, not used for later calculations
+mydt.snv <- mydt %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") ) %>% 
+  filter(inTarget == TRUE)
+```
+
+## Results
+
+In total, there are `r length(unique(dt.long$Exon))` Exons in this analysis. And EventType by spice region variants by Exon are 
+
+```{r}
+
+table( mydt.snv$Exon[!is.na(mydt.snv$score0)])
+```
+
+```{r}
+
+table( mydt.snv$EventType[!is.na(mydt.snv$score0)], mydt.snv$Exon[!is.na(mydt.snv$score0)], mydt.snv$spliceR[!is.na(mydt.snv$score0)])
+```
+
+Since we have two/three or more replicates in each Exon, the data plotted below were doubled/tripled or multipled in number. 
+
+
+Unique Variants are 
+
+```{r}
+## provide summary of number of variants.
+
+dt.av <- mydt %>% dplyr::select(uPOS, Exon, REF, ALT, inTarget, functional.scoreA, functional.scoreB, functional.scoreC, functional.scoreD, spliceR, EventType) %>% unique()
+dt <- dt.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>%##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") ) %>% 
+  filter(inTarget == TRUE)
+cat("score ", Score_method, "\n")
+if(Score_method == "A"){
+  print(table(dt$Exon[!is.na(dt$functional.scoreA)]))
+  print(table( dt$EventType[!is.na(dt$functional.scoreA)], dt$Exon[!is.na(dt$functional.scoreA)], dt$spliceR[!is.na(dt$functional.scoreA)]))
+}else if(Score_method == "B"){
+  print(table(dt$Exon[!is.na(dt$functional.scoreB)]))
+  print(table( dt$EventType[!is.na(dt$functional.scoreB)], dt$Exon[!is.na(dt$functional.scoreB)], dt$spliceR[!is.na(dt$functional.scoreB)]))
+}else if(Score_method == "C"){
+  print(table(dt$Exon[!is.na(dt$functional.scoreC)]))
+  print(table( dt$EventType[!is.na(dt$functional.scoreC)], dt$Exon[!is.na(dt$functional.scoreC)], dt$spliceR[!is.na(dt$functional.scoreC)]))
+}else{
+  print(table(dt$Exon[!is.na(dt$functional.scoreD)]))
+  print(table( dt$EventType[!is.na(dt$functional.scoreD)], dt$Exon[!is.na(dt$functional.scoreD)], dt$spliceR[!is.na(dt$functional.scoreD)]))
+}
+```
+
+## 1. normalized Results for Ratio:
+
+
+```{r, message=FALSE, warning=FALSE}
+
+dt1 <- norm_win_exon(mydt)
+dt2 <- norm_x_exon(dt1)
+
+
+```
+
+
+### Step1 normalization.
+
+Plot shows SNV only
+
+```{r, include=TRUE}
+dt2.av <- dt2 ## dt2.av all variants, dt2 SNV only and in Target region
+
+dt2 <- dt2.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") ) %>% 
+  filter(inTarget == TRUE)
+
+```
+
+```{r, include=TRUE, fig.width=3*min(length(exons), 3), fig.height=4*ceiling(length(exons)/3)}
+
+
+etype8 <- unique(dt2$EventType)
+if(length(etype8) >= 8){
+  mycol8 <-  c(1, 5, 6, 2, 3, 4, 7, 8, 9)
+}else{
+  mycol8 <-  c(1, 5, 3, 4, 2, 6)
+
+}
+names(mycol8) <- etype8
+mycol2.1 <- mycol8[etype8]
+
+nrows <- max(ceiling(length(exons)/3), 1)
+# debug only heeeeer
+##nrows <- 1
+par(mfrow=c(nrows, 3))
+for(ei in unique(dt2$Exon)){
+plot(dt2$score0[dt2$Exon == ei], dt2$score1[dt2$Exon == ei], pch = 20, col = mycol8[dt2$EventType[dt2$Exon == ei]], main = paste0(ei, " (N =", max(dt2$Experiment[dt2$Exon == ei & !is.na(dt2$score0)]), " , P =", length(unique(dt2$POS[dt2$Exon == ei])), ")"), 
+     xlab = "score0", ylab = 'score1')
+abline(a = 0, b = 1, col = "gray", lty = 2)
+}
+plot(0, 0, type = "n", xlab = '', ylab = '', axes = F)
+legend(x = "bottom", 
+       legend = etype8,
+       pch =20,
+       col =mycol2.1,
+       xpd = TRUE, 
+       cex = 1, ncol = 1) # Horizontal legend
+```
+
+### Step2 normalization.
+
+Plot shows SNV only
+
+
+```{r, include=TRUE, fig.width=3*min(length(exons)+1, 3), fig.height=4*ceiling(length(exons)/3)}
+
+par(mfrow=c(nrows, 3))
+for(ei in unique(dt$Exon)){
+plot(dt2$score1[dt2$Exon == ei], dt2$score2[dt2$Exon == ei], pch = 20, col = mycol8[dt2$EventType[dt2$Exon == ei]], main = paste0(ei, " (N =", max(dt2$Experiment[dt2$Exon == ei & !is.na(dt2$score0)]), " , P =", length(unique(dt2$POS[dt2$Exon == ei])), ")"), 
+     xlab = "score1", ylab = 'score2')
+abline(a = 0, b = 1, col = "gray", lty = 2)
+}
+
+plot(0, 0, type = "n", xlab = '', ylab = '', axes = F)
+legend(x = "bottom", 
+       legend = etype8,
+       pch =20,
+       col =mycol2.1,
+       xpd = TRUE, 
+       cex = 1, ncol = 1) # Horizontal legend
+```
+
+### Put together 
+
+Plot shows SNV only
+
+
+```{r, include=TRUE, fig.width=12, fig.height=12}
+
+par(mfrow=c(3,1))
+plot(dt2$POS, dt2$score0, pch = 20, col = mycol8[dt2$EventType], main = "Raw", 
+     xlab = "AA position", ylab = 'functional score', ylim = c(-7, 3))
+abline(h = 0, col = "gray", lty = 2)
+plot(dt2$POS, dt2$score1, pch = 20, col = mycol8[dt2$EventType], main = "Normalization within Exon", 
+     xlab = "AA position", ylab = 'functional score', ylim = c(-7, 3))
+abline(h = 0, col = "gray", lty = 2)
+plot(dt2$POS, dt2$score2, pch = 20, col = mycol8[dt2$EventType], main = "Normalization across Exons", 
+     xlab = "AA position", ylab = 'functional score', ylim = c(-7, 3))
+abline(h = 0, col = "gray", lty = 2)
+legend(x = "bottom", 
+       legend = etype8,
+       pch =20,
+       col =mycol2.1,
+       xpd = TRUE, 
+       cex = 1, ncol = 3) # Horizontal legend
+
+```
+
+
+## 2. Score distribution and CI
+
+### Norm check Individual scores ie pooled replicates
+
+Plot shows SNV only
+
+Including splicing region variants
+
+```{r}
+
+dt2plot <- dt2 %>% filter(EventType %in% c("StopGain", "Synonymous")) 
+p <- dt2plot %>%
+  ggplot( aes(x=score2, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.20) +
+  scale_fill_manual(values=c( "red", "#69b3a2")) +  ggtitle ( paste0(Ratio," individual score after normalization"))
+ggplotly(p)
+
+
+```
+
+Plot shows SNV only
+
+Excluding splicing region variants. Defined as SpliceR == TRUE only.
+
+```{r}
+dt2plot <- dt2 %>% filter(EventType %in% c("StopGain", "Synonymous")) %>% filter(spliceR== FALSE)
+p <- dt2plot %>%
+  ggplot( aes(x=score2, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.2) +
+  scale_fill_manual(values=c( "red", "#69b3a2")) +  ggtitle ( paste0(Ratio," individual score after normalization excluding splicing region"))
+ggplotly(p)
+
+
+```
+
+Totally, there were `r nrow(dt2plot)` variants left from original `r nrow(dt2)` variants. 
+
+```{r}
+
+##write(length(which(dt2$EventType == "Synonymous")), stderr())
+
+temp <- dt2$score2[dt2$EventType == "StopGain"]
+shapiro.test(temp[sample(1:length(temp), min(4500, length(temp)))])
+
+temp <- dt2$score2[dt2$EventType == "Synonymous"]
+shapiro.test(temp[sample(1:length(temp), min(4500, length(temp)))])
+
+```
+
+### Norm check Average score ie single variant score
+
+Plots show SNV only.
+
+Including splice region variants.
+
+```{r}
+temp <- dt2.av %>% select(Exon, uPOS, POS, EventType, REF,     
+ALT, AApos,AltAA, AltCodon, EventType, 
+RefAA, RefCodon, SpliceAI_ALLELE, SpliceAI_DP_AG, SpliceAI_DP_AL, SpliceAI_DP_DG,  SpliceAI_DP_DL, SpliceAI_DS_AG,  SpliceAI_DS_AL, SpliceAI_DS_DG, SpliceAI_DS_DL, spliceR , Experiment, score2, inTarget) %>% unique() %>% mutate(Experiment = paste0("E", Experiment)) %>% tidyr::spread(key = Experiment, value = score2)
+
+
+if(nmax == 6){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4, E5, E6), na.rm = T))
+}else if(nmax == 5){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4,E5), na.rm = T))
+}else if(nmax == 4){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4), na.rm = T))
+}else if(nmax == 3){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3), na.rm = T))
+}else if(nmax == 2){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2), na.rm = T))
+} else {
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = E1)
+}
+
+temp1 <- dt2.av %>% select(uPOS, Experiment, score1) %>% mutate(Experiment = paste0("E", Experiment)) %>% tidyr::spread(key = Experiment, value = score1)
+dt2.av.temp <- temp1
+for (i in 1:nmax){
+  Ei <- paste0("E", i)
+  Ri_wie_norm <- paste0("R",i,"_wie_norm")
+  dt2.av.temp <- dt2.av.temp %>% rename(!!sym(Ri_wie_norm) := !!sym(Ei))
+}
+temp1 <- dt2.av %>% select(uPOS, Experiment, score2) %>% mutate(Experiment = paste0("E", Experiment)) %>% tidyr::spread(key = Experiment, value = score2)
+dt2.av.temp2 <- temp1
+for (i in 1:nmax){
+  Ei <- paste0("E", i)
+  Ri_ce_norm <- paste0("R",i,"_ce_norm")
+  dt2.av.temp2 <- dt2.av.temp2 %>% rename(!!sym(Ri_ce_norm) := !!sym(Ei))
+}
+
+
+dt2.av.temp <- merge(merge(dt0, dt2.av.temp), dt2.av.temp2) ## this is to be used to merge with D14vsLib_fs.2 later for output
+
+# write(dim(D14vsLib_fs.2), stderr())
+# write(length(unique(D14vsLib_fs.2$uPOS)), stderr())
+
+D14vsLib_fs.2.av <- D14vsLib_fs.2
+D14vsLib_fs.2 <- D14vsLib_fs.2.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") ) %>% 
+  filter(inTarget == TRUE)
+dt2plot <- D14vsLib_fs.2 %>% filter(EventType %in% c("StopGain", "Synonymous")) 
+p <- dt2plot %>% mutate(name = paste(Exon, uPOS)) %>% 
+  ggplot( aes(x=functional.score, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c( "red", "#69b3a2")) +  ggtitle ( paste0("Functional.score ", Score_method, ifelse(Lab_curation == "No", " without ", " with "), "Lab Curation ", "extra filter applied_", extraFilter))
+ggplotly(p)
+
+
+```
+
+Excluding splice region variants (spliceR == TRUE).
+
+```{r}
+
+dt2plot <- D14vsLib_fs.2%>% filter(EventType %in% c("StopGain", "Synonymous")) %>% filter(spliceR== FALSE)
+p <- dt2plot %>%
+  ggplot( aes(x=functional.score, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c( "red", "#69b3a2")) +  ggtitle ( paste0("Final.functional.score ", Score_method, ifelse(Lab_curation == "No", " w.o.", "with"), " Lab Curation", " extra filter applied_", extraFilter, " Excluding Splice region"))
+ggplotly(p)
+
+
+```
+
+Functional scores By Exon, SNV only
+
+```{r}
+dt2plot <- D14vsLib_fs.2%>% filter(EventType %in% c("StopGain", "Synonymous")) %>% filter(spliceR== FALSE)
+p <- dt2plot %>%
+  ggplot( aes(x=functional.score, y = Exon, fill=EventType, text = uPOS)) +
+  geom_point( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c( "red", "#69b3a2")) +  ggtitle ( paste0("Final.functional.score ", Score_method, ifelse(Lab_curation == "No", " w.o.", "with"), " Lab Curation", " extra filter applied_", extraFilter, " Excluding Splice region"))
+ggplotly(p)
+
+
+```
+
+```{r}
+temp <- D14vsLib_fs.2
+shapiro.test(temp$functional.score[temp$EventType == "StopGain"])
+shapiro.test(temp$functional.score[temp$EventType == "Synonymous"])
+
+```
+
+
+### QQ plots 1. Individual scores
+
+Plots show SNV only.
+
+```{r, fig.width=8, fig.height=4}
+
+par(mfrow=c(1,2))
+qqnorm(dt2$score2[dt2$EventType == "StopGain"], main=paste0(Ratio, ' StopGain'))
+qqline(dt2$score2[dt2$EventType == "StopGain"], col = "steelblue", lwd = 2)
+qqnorm(dt2$score2[dt2$EventType == "Synonymous"], main=paste0(Ratio, ' Synonymous'))
+qqline(dt2$score2[dt2$EventType == "Synonymous"], col = "steelblue", lwd = 2)
+
+
+```
+
+### QQ plots 2. Average score
+
+Plots show SNV only
+
+```{r, fig.width=8, fig.height=4}
+temp <- D14vsLib_fs.2
+par(mfrow=c(1,2))
+qqnorm(temp$functional.score[temp$EventType == "StopGain"], main=paste0(Ratio, ' StopGain'))
+qqline(temp$functional.score[temp$EventType == "StopGain"], col = "steelblue", lwd = 2)
+qqnorm(temp$functional.score[temp$EventType == "Synonymous"], main=paste0(Ratio, ' Synonymous'))
+qqline(temp$functional.score[temp$EventType == "Synonymous"], col = "steelblue", lwd = 2)
+
+```
+
+### Outlier defn 
+
+Individual Score pooled are used. 
+
+Focus on StopGain and Synonymous only.
+
+```{r}
+
+#method1 bootstrap
+
+bootxP<-function(x,y, b,alpha){
+# x is your data
+# b is the number of bootstraps.
+# alpha is your type I error
+
+
+n <-2000
+set.seed(123)
+xp <- rep(0, b)
+for(i in 1:b){
+  x_boot<-c(sample(x,n,replace=TRUE), sample(y,n,replace=TRUE))
+  xp[i] <- quantile(x_boot, alpha)
+}
+
+return(median(xp))
+}
+
+```
+
+
+
+Bootstrap Method
+
+1. Estimate of percentile of sample 
+
+We sample large number (N) of samples and each time we get the xth percentile of the bootstrapped sample, estimate of the percentile will be the median of the N number of xth percentile. 
+
+
+```{r}
+x<- dt2$score2[dt2$EventType %in% c("StopGain")]
+y<- dt2$score2[dt2$EventType %in% c("Synonymous")]
+
+if(sum(is.na(x))>0) {
+  x <- x[-which(is.na(x))]
+}
+if(sum(is.na(y))>0) {
+  y <- y[-which(is.na(y))]
+}
+
+bl <- bu <- NA
+if(params$Outlierremove != "No"){
+  alpha <- ifelse(params$Outlierremove=="p1", 0.01, 
+                  ifelse(params$Outlierremove == "p2", 0.02,
+                         ifelse(params$Outlierremove == "p5", 0.05, NA)))
+  bl <- bootxP(x, y,5000,alpha)
+  bu <- bootxP(x, y,5000,1-alpha)
+}
+
+```
+
+Plots show SNV only
+
+Including splicing region variants.
+
+```{r}
+
+dt2plot <- dt2 %>% filter(EventType %in% c("Missense", "StopGain", "Synonymous"))
+p <- dt2plot %>%
+  ggplot( aes(x=score2, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c("blue", "red", "#69b3a2")) +  ggtitle ( paste0("score2", Score_method, ifelse(Lab_curation == "No", "without", "with"), "Lab Cureation"))
+if(params$Outlierremove != "No"){
+  p <- p+ geom_vline(xintercept=c(bl,bu), linetype="dashed", color = "red")  ## upper stopgain
+}
+ggplotly(p)
+
+
+```
+
+Excluding splicing region variants (spliceR == TRUE).
+
+```{r}
+
+dt2plot <- dt2 %>% filter(EventType %in% c("Missense", "StopGain", "Synonymous")) %>% filter(spliceR== FALSE)
+p <- dt2plot %>%
+  ggplot( aes(x=score2, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c("blue", "red", "#69b3a2")) +  ggtitle ( paste0("indiviual score after normalization ", Score_method, ifelse(Lab_curation == "No", "without", "with"), "Lab Cureation", "extra filter applied_", extraFilter))
+if(params$Outlierremove != "No"){
+  p <- p+ geom_vline(xintercept=c(bl,bu), linetype="dashed", color = "red")  ## upper stopgain
+}
+
+ggplotly(p)
+
+```
+
+
+`r ifelse(params$Outlierremove != "No", print(paste0(Ratio, " bootstrapped ", alpha*100, " and ", (1-alpha)*100, " percentile of StopGain & Synonymous are ", bl, " and ", bu)), "")`
+
+```{r removeOutlier}
+
+if(params$Outlierremove != "No"){
+  dt.temp <- dt2.av %>% select(uPOS, Experiment, score2) %>% mutate(Experiment = paste0("S", Experiment)) %>% spread(key = Experiment, value = score2)
+  dt0 <- merge(dt0, dt.temp)
+  temp <- dt2.av %>% mutate(score2 = ifelse(score2 <bl |score2 >bu, NA, score2))
+  temp <- temp %>% select(Exon, uPOS, POS, EventType, REF,     
+                          ALT, AApos,AltAA, AltCodon, EventType, RefAA, RefCodon, SpliceAI_ALLELE, SpliceAI_DP_AG, SpliceAI_DP_AL, SpliceAI_DP_DG,  SpliceAI_DP_DL, SpliceAI_DS_AG,  SpliceAI_DS_AL, SpliceAI_DS_DG,
+                          SpliceAI_DS_DL, spliceR , Experiment, score2) %>% mutate(Experiment = paste0("E", Experiment)) %>% spread(key = Experiment, value = score2)
+
+  if(nmax == 6){
+    D14vsLib_fs.2o <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4, E5, E6), na.rm = T))
+  }else if(nmax == 5){
+    D14vsLib_fs.2o <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4,E5), na.rm = T))
+  }else if(nmax == 4){
+    D14vsLib_fs.2o <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3,E4), na.rm = T))
+  }else if(nmax == 3){
+  D14vsLib_fs.2 <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2, E3), na.rm = T))
+}else if(nmax == 2){
+  D14vsLib_fs.2o <- temp %>%rowwise() %>% mutate(functional.score = mean(c(E1, E2), na.rm = T))
+} else {
+  D14vsLib_fs.2o <- temp %>%rowwise() %>% mutate(functional.score = E1)
+}
+  D14vsLib_fs.2 <- D14vsLib_fs.2o
+}
+
+
+```
+
+## 3. Group distribution
+
+### Average
+
+Plots show SNV only.
+
+```{r}
+dt2plot <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense", "StopGain", "Synonymous")) 
+
+p <- dt2plot %>%
+  ggplot( aes(x=functional.score, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.10) +
+  scale_fill_manual(values=c( "blue", "red","#69b3a2")) +  ggtitle ( paste0(Ratio," functional score"))
+ggplotly(p)
+
+dt2plot <-  D14vsLib_fs.2%>% filter(EventType %in% c("Missense", "StopGain", "Synonymous"))
+
+ggplot(dt2plot, aes(x=EventType, y=functional.score)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4) +  ggtitle (Ratio) + geom_jitter(shape=16, position=position_jitter(0.2))
+
+sg <- D14vsLib_fs.2$functional.score[D14vsLib_fs.2$EventType == "StopGain"]
+sn <- D14vsLib_fs.2$functional.score[D14vsLib_fs.2$EventType == "Synonymous"]
+ms <- D14vsLib_fs.2$functional.score[D14vsLib_fs.2$EventType == "Missense"]
+
+wilcox.test(sg, sn, alternative = "l")
+wilcox.test(ms, sn, alternative = "l")
+wilcox.test(sg, ms, alternative = "l")
+
+```
+
+## 4. Classification perf 
+
+This section we exclude the splice region variants (spliceR == TRUE) and variants on chunling's list
+
+### 4.1 ROC average 
+
+```{r rocfun}
+## input score and type column name, casename, controlname 
+## plot ROC, get auc, sens, spec
+##
+myroc2 <- function(data, typecolumn, casen, controln){
+  data_long <- data %>% filter(spliceR == FALSE) %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G")) %>%
+    filter( !!sym(typecolumn)%in% c(casen, controln)) %>% arrange(functional.score)
+  ## plot
+  par(mfrow = c(1, 1))
+  roc_score = roc(controls = data_long$functional.score[which(data_long[,typecolumn] == controln)], cases = data_long$functional.score[which(data_long[,typecolumn] == casen)], direction = ">")  # AUC score
+  plot(roc_score, main="ROC curve")
+  text(0.2, 0.2, paste0("AUC: ", round(roc_score$auc, 3)))
+  
+  out <- data.frame(functional.score = roc_score$"threshold", sens =  roc_score$"sensitivities", specs = roc_score$"specificities")
+  
+  out$avg <- out$sens+out$specs
+  
+  ind <- which(out$avg == max(out$avg))
+  if(length(ind) == 1){
+    cutoff0A <- unique(out$functional.score[ind])
+    sen0A <- out$sens[ind]
+    spec0A <- out$specs[ind]
+  
+  } else{
+    cutoff0A <- unique(out$functional.score[ind[1]])
+    sen0A <- out$sens[ind[1]]
+    spec0A <- out$specs[ind[1]]
+  }
+  
+  auc0A <- roc_score$auc
+  
+  data_long$pred.class <- ifelse(data_long$functional.score < cutoff0A, casen, controln)
+  cat("\n")
+  
+  x <- pull(data_long, typecolumn); y = data_long$pred.class
+  x <- factor(x, levels = c(casen, controln)); y <- factor(y, levels = c(casen, controln))
+  tb0A <- table(truth = x, pred = y)
+  
+  ## return the metrics
+  return(list(n = nrow(data_long), cutoff = cutoff0A, auc = as.numeric(auc0A), sen = sen0A, spec = spec0A, tb = tb0A))
+}
+
+```
+
+#### Data Driven
+
+```{r ROC1, include=TRUE, fig.width=5, fig.height=5, message=FALSE, warning=FALSE}
+
+
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("StopGain", "Synonymous")) %>% filter(spliceR== FALSE) %>% arrange(functional.score)
+if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+}
+ROC0 <- myroc2(temp,  typecolumn = "EventType", casen ="StopGain" , controln = "Synonymous")
+
+```
+
+Classification cutoff `r ROC0$cutoff`, sensitivity `r ROC0$sen`, specificity `r ROC0$spec`. 
+
+`r print(ROC0$tb)`
+
+#### Clinvar data
+
+clinvar file is provided as `r params$clinvarfile`\
+
+```{r}
+if(!is.null(params$clinvarfile)){
+  if (grepl("\\.txt$", params$clinvarfile)) {
+    # Read the file using read.table
+    DBD_missense_classified_in_ClinVar <- read.table(file = params$clinvarfile, header = TRUE, sep = '\t')
+  } else {
+    DBD_missense_classified_in_ClinVar <- read_excel(params$clinvarfile)
+  }
+  
+  DBD_missense_classified_in_ClinVar <- DBD_missense_classified_in_ClinVar %>% unique()
+  
+  
+  DBD_missense_classified_in_ClinVar <- DBD_missense_classified_in_ClinVar %>% mutate(uPOS = paste( GRCh38Location-1, Ref, Alt, sep = "_"))
+  
+  if(nrow(DBD_missense_classified_in_ClinVar) != length(unique(DBD_missense_classified_in_ClinVar$uPOS))) stop("error DBD_missense_classified_in_ClinVar has duplicate uPOS")
+  
+  if(length(grep("Exon", colnames(DBD_missense_classified_in_ClinVar)))>0){
+    DBD_missense_classified_in_ClinVar <- DBD_missense_classified_in_ClinVar %>% dplyr::select(-Exon)
+  }
+  
+  DBD_missense_classified_in_ClinVar$type <- ifelse(DBD_missense_classified_in_ClinVar$classification %in% c("B", "LB", "B (Single)", "B/LB", "LB (Single)"), "Benign", "Pathogenic")  
+  
+  D14vsLib_fs.2.av <- merge(D14vsLib_fs.2.av, DBD_missense_classified_in_ClinVar, by.x = "uPOS", by.y = "uPOS", all.x = T)
+
+  D14vsLib_fs.2 <- D14vsLib_fs.2.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>%##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") )%>% 
+    filter(inTarget == TRUE)
+} else{
+  D14vsLib_fs.2 <- D14vsLib_fs.2.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>%##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") )%>%
+    filter(inTarget == TRUE)
+}
+```
+
+```{r ROC1.c, include=TRUE, fig.width=5, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)){
+  temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR== FALSE) %>% arrange(functional.score)
+  if(!is.null(params$vexclude)){
+      temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  ROC0.c <- myroc2(temp,  typecolumn = "type", casen ="Pathogenic" , controln = "Benign")
+}
+```
+
+
+`r ifelse(!is.null(params$clinvarfile), paste0("Classification cutoff ", ROC0.c$cutoff, ", sensitivity ", ROC0.c$sen, " specificity ", ROC0.c$spec), "")`
+
+```{r}
+if(!is.null(params$clinvarfile)) {
+  print(ROC0.c$tb)
+}
+```
+
+`r ifelse(!is.null(params$clinvarfile), "- apply data binary cutoff to clinvar data", "")`
+
+```{r ROC1.dc, include=TRUE, fig.width=5, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)) {
+  temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR== FALSE) %>% arrange(functional.score) 
+  
+  temp$pred.class <- ifelse(temp$functional.score < ROC0$cutoff, "Pathogenic", "Benign")
+  
+  temp$pred.class <- factor(temp$pred.class, levels = c("Pathogenic", "Benign") )
+  temp$type <- factor(temp$type, levels = c("Pathogenic", "Benign") )
+  
+  tb0.dc <- table(truth = temp$type, pred = temp$pred.class)
+  tb0.dc
+}
+
+```
+
+
+```{r, results = 'asis', fig.width=5, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  if(nrow(HDR) != length(unique(HDR$uPOS))) stop("error HDR has duplicate uPOS")
+  D14vsLib_fs.2.av <- merge(D14vsLib_fs.2.av, HDR, by.x = "uPOS", by.y = "uPOS", all.x = T)
+  D14vsLib_fs.2 <- D14vsLib_fs.2.av %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>%## filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G") )%>%
+    filter(inTarget == TRUE)
+  
+  cat("#### HDR data", "\n")
+  cat("\n")
+  temp <- D14vsLib_fs.2 %>% filter(htype %in% c("Abnormal", "Normal")) %>% filter(spliceR== FALSE) %>% arrange(functional.score)
+  if(!is.null(params$vexclude)){
+      temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  ROC0.h <- myroc2(temp,  typecolumn = "htype", casen ="Abnormal" , controln = "Normal")
+  N_HDR <- nrow(temp)
+  cat("\n Classification cutoff",  ROC0.h$cutoff, " sensitivity ", ROC0.h$sen, " specificity ",  ROC0.h$spec, ". \n\n" )
+}
+```
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  print(ROC0.h$tb)
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), "-- apply data binary cutoff to HDR data ", "")`
+
+```{r}
+if(!is.null(params$HDRfile)){
+  temp <- D14vsLib_fs.2 %>% filter(htype %in% c("Abnormal", "Normal")) %>% filter(spliceR== FALSE) %>% arrange(functional.score) 
+
+  temp$pred.class <- ifelse(temp$functional.score < ROC0$cutoff, "Pathogenic", "Benign")
+
+  temp$pred.class <- factor(temp$pred.class, levels = c("Pathogenic", "Benign") )
+  temp$htype <- factor(temp$htype, levels = c("Abnormal", "Normal") )
+  
+  tb0.dh <- table(truth = temp$htype, pred = temp$pred.class)
+  cat("\n")
+  print(tb0.dh)
+}
+```
+
+### 4.2 Mixture Model 
+
+Findlay paper "fitting a two-component Gaussian mixture model in which the parameters of the ‘non-functional’ distribution were based on all nonsense SNVs and the ‘functional’ distribution based on synonymous SNVs not depleted in RNA (Extended Data Fig. 7). We then used this model to estimate the probability of each SNV’s score being drawn from the non-functional distribution (Pnf). SNVs with Pnf < 0.01 were categorized as functional (72.5%); SNVs with Pnf > 0.99 were categorized as non-functional (21.1%); and SNVs with 0.01 < Pnf < 0.99 (6.4%) were categorized as intermediate."
+
+
+
+```{r MixModelfun}
+mmfun2 <- function(data, typecolumn, casen, controln, lambda = "data", MM = "normal"){
+  ## plot mixture model 
+  ## Get thresholds and return posterior prob, 
+  
+  f1A <- f2A <- f3A <- f4A <- f5A <- f6A  <- NA
+  
+  data0 <- data %>% filter(!is.na(functional.score)) 
+  # write(data0$uPOS[duplicated(data0$uPOS)], stderr())
+  # write(data$uPOS[duplicated(data$uPOS)], stderr())
+  #   
+  
+  temp <- data0 %>% filter(!!sym(typecolumn) %in% c(casen, controln)) %>% filter(nchar(REF) == 1 & nchar(ALT) == 1) %>% ##filter(REF %in% c("A", "T", "C", "G") & ALT %in% c("A", "T", "C", "G")) %>% 
+    filter(spliceR == FALSE) %>% filter(inTarget == TRUE)
+
+  if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  
+  myind <- match(temp$uPOS, data0$uPOS)
+  
+  m1 <- mean(temp$functional.score[which(pull(temp, typecolumn) == controln)], na.rm = TRUE)
+  tmp <- temp$functional.score[which(pull(temp, typecolumn) == controln)]
+  tmp2 <- tmp ## tmp[which(tmp > median(tmp)-sd(tmp) & tmp < median(tmp)+sd(tmp))]
+  
+  v1 <- sd(tmp2, na.rm = TRUE)
+  
+  m2 <- mean(temp$functional.score[which(pull(temp, typecolumn) == casen)])
+  v2 <- sd(temp$functional.score[which(pull(temp, typecolumn) == casen)])
+  l1 <- sum(pull(temp, typecolumn) == casen)/sum(pull(temp, typecolumn) == controln)
+  
+  if(params$MM == "Robust"){
+    # robust calculation
+    m2 = mean(temp$functional.score[which(pull(temp, typecolumn) == casen)], trim = 0.05)
+    m1 = mean(temp$functional.score[which(pull(temp, typecolumn) == controln)], trim = 0.05)
+    v2 = IQR(temp$functional.score[which(pull(temp, typecolumn) == casen)]) / 1.349
+    v1 = IQR(temp$functional.score[which(pull(temp, typecolumn) == controln)]) / 1.349
+  }
+  error.occured <- FALSE
+  tryCatch( {
+    x <- normalmixEM(temp$functional.score, 
+                     lambda = l1, k = 2,
+                     mean.constr = c(m2, m1),
+                     sd.constr = c(v2, v1),
+                     mu = c(m2, m1), 
+                     sigma = c(v2, v1))
+    m1 = list(mu = x$mu, sd = x$sigma)
+    
+    prior = ifelse(lambda == "0.1", 0.1, ifelse(lambda == "0.2", 0.2, x$lambda[1]))
+    print("prior used")
+    print(prior)
+    
+    p1 = posteriorProbabilityFromGaussianModels(data0$functional.score, rep(0, length(data0$functional.score)), m1, prior = prior)
+    
+    # p1 has all prob and LR for non NA functional scores data0, m1 come from SNV, inTarget, non Splice region and subset to two levels only (functional and non functional)
+    data0$posteriorP <- unlist(p1["posteriorP"])
+    data0$likelihoodRatio  <- unlist(p1["likelihoodRatio"])
+    
+    temp2 <- left_join(data[,c("uPOS", "functional.score")], data0[, c("uPOS", "posteriorP", "likelihoodRatio")])
+    data <- temp2 
+    
+    print("difference from data posterior < 1e-08: ")
+    print(max(abs(unlist(p1['posteriorP'])[myind] -   x$posterior[,1])) < 1e-08)
+    
+    par(mfrow = c(1, 1))
+    plot(temp$functional.score, unlist(p1['posteriorP'])[myind], col = ifelse(pull(temp, typecolumn) == casen, 2, 1))
+    f1A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.01][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.01], decreasing = T)][1]
+    f2A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.99][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.99], decreasing = T)][1]
+    
+    f3A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.02][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.02], decreasing = T)][1]
+    f4A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.98][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.98], decreasing = T)][1]
+    
+    f5A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.05][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.05], decreasing = T)][1]
+    f6A <- temp$functional.score[unlist(p1['posteriorP'])[myind]>0.95][order(temp$functional.score[unlist(p1['posteriorP'])[myind]>0.95], decreasing = T)][1]
+
+    
+    abline(v = f1A)
+    abline(v = f2A)
+    abline(h = 0.01)
+    abline(h = 0.99)
+    
+    abline(v = f3A, lty = 2)
+    abline(v = f4A, lty = 2)
+    abline(h = 0.02, lty = 2)
+    abline(h = 0.98, lty = 2)
+
+    abline(v = f5A, lty = 3)
+    abline(v = f6A, lty = 3)
+    abline(h = 0.05, lty = 3)
+    abline(h = 0.95, lty = 3)
+    
+    par(mfrow = c(1, 1))
+    plot(x, which=2, xlab2= "", yaxt= "n", xlim = c(range(x$x)[1]-2, range(x$x)[2]+2), main2 ="Two components prob(nonfunctional) with cutoffs", lwd2=0.8, border = "azure3")
+    lines(density(x$x), lty=2, lwd=0.8)
+    
+    abline(v = f1A)
+    abline(v = f2A)
+    abline(v = f3A, lty = 2)
+    abline(v = f4A, lty = 2)
+    
+    abline(v = f5A, lty = 3)
+    abline(v = f6A, lty = 3)
+  }
+  , error = function(e) {error.occured <<- TRUE})
+  print(error.occured)
+  
+  return(list(error.occured = error.occured, f1 = as.numeric(f1A), f99 = as.numeric(f2A), f2=as.numeric(f3A), f98 = as.numeric(f4A), f5=as.numeric(f5A), f95 = as.numeric(f6A), data = data[, c("uPOS", "posteriorP", "likelihoodRatio")]))
+}
+
+```
+
+#### Data driven
+
+Based on distribution from StopGain and synonymous non splicing region (spliceR == FALSE), we also build mixture model.
+
+```{r MixModel, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+library(mixtools)
+
+temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% filter(EventType %in% c("StopGain", "Synonymous")) %>% 
+  arrange(functional.score) %>% filter(spliceR== FALSE) %>% filter(inTarget == TRUE)
+if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+}
+
+p <- temp %>%
+  ggplot( aes(x=functional.score, fill=EventType)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+  scale_fill_manual(values=c("red",  "#69b3a2")) +  ggtitle ( "functional.score for MM building")
+ggplotly(p)
+
+D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% arrange(uPOS)
+# write(D14vsLib_fs.2.av$uPOS[duplicated(D14vsLib_fs.2.av$uPOS)], stderr())
+# write(paste0(params$Output_dir, Gene, "_", Ratio, "_", params$vset,"_", params$loessSubset, "_", params$EventCount_Filter, "_", params$Score_method, "_", (paste0(ifelse(Lab_curation == "No", "without", "with"), "_LabCureation_")), "E", gsub(", ", "", Exons), "_MM_", params$MM, "_Outlierremove_",  params$Outlierremove, "_extrafilter_", extraFilter, "_metrics.csv"), stderr()
+# )
+mm0 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "EventType", casen = "StopGain", controln = "Synonymous", MM = params$MM, lambda = "data")
+##write(dim(mm0$data$posteriorP), stderr())
+##write(dim(D14vsLib_fs.2.av), stderr())
+D14vsLib_fs.2.av$posteriorP <- mm0$data$posteriorP # <- D14vsLib_fs.2.av %>% mutate(posteriorP= mm0$data$posteriorP) 
+```
+
+`r paste0("There is",  ifelse(mm0$error.occured, " AN ", " NO "), "Error Ocurred")`.
+
+`r mm0$f99` was the functional score corresponding to the probability of non functional at 99% and `r mm0$f1` was the functional score corresponding to the probability of non functional at 1%.
+
+`r mm0$f98` was the functional score corresponding to the probability of non functional at 98% and `r mm0$f2` was the functional score corresponding to the probability of non functional at 2%.
+
+`r mm0$f95` was the functional score corresponding to the probability of non functional at 95% and `r mm0$f5` was the functional score corresponding to the probability of non functional at 5%.
+
+
+If we use these two thresholds to classify the variants of synonymous, stopgain and missense. 
+
+First, 1-99% cutoff
+Second, 2-98% cutoff
+Third, 5-95% cutoff
+
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+variants on chunling's list are included.
+
+```{r MixModel2, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+temp <- rbind(temp, temp2)
+
+
+temp$ctype <- ifelse(temp$functional.score>mm0$f1, "neutural", 
+                     ifelse(temp$functional.score>mm0$f99, "intermediate", "pathogenic"))
+
+
+temp$ctype2 <- ifelse(temp$functional.score>mm0$f2, "neutural", 
+                     ifelse(temp$functional.score>mm0$f98, "intermediate", "pathogenic"))
+
+temp$ctype3 <- ifelse(temp$functional.score>mm0$f5, "neutural", 
+                     ifelse(temp$functional.score>mm0$f95, "intermediate", "pathogenic"))
+
+
+temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+
+temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+tb <- table(truth = temp$EventType,pred = temp$ctype)
+print(tb)
+
+tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+print(tb2)
+tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+print(tb3)
+```
+
+
+` r ifelse(!is.null(params$clinvarfile), "- apply cutoffs to clinvar data:", "")` 
+
+
+```{r MixModel2.dc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)) {
+  temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+  
+  temp$ctype <- ifelse(temp$functional.score>mm0$f1, "neutural", 
+                       ifelse(temp$functional.score>mm0$f99, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype2 <- ifelse(temp$functional.score>mm0$f2, "neutural", 
+                       ifelse(temp$functional.score>mm0$f98, "intermediate", "pathogenic"))
+  
+  temp$ctype3 <- ifelse(temp$functional.score>mm0$f5, "neutural", 
+                       ifelse(temp$functional.score>mm0$f95, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+  
+  tb <- table( truth = temp$type, pred=temp$ctype)
+  print(tb)
+  tb2 <- table( truth = temp$type, pred = temp$ctype2)
+  print(tb2)
+  tb3 <- table( truth = temp$type, pred = temp$ctype3)
+  print(tb3)
+}
+```
+
+
+#### Data driven with prior 0.1
+
+Based on distribution from StopGain and synonymous non splicing region (spliceR == FALSE), we also build mixture model.
+
+```{r MixModel.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+mm0.p01 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "EventType", casen = "StopGain", controln = "Synonymous", MM = params$MM, lambda = "0.1")
+D14vsLib_fs.2.av$posteriorP_p01= mm0.p01$data$posteriorP #<- D14vsLib_fs.2.av %>% mutate(posteriorP_p01= mm0.p01$data$posteriorP)
+```
+
+`r paste0("There is",  ifelse(mm0.p01$error.occured, " AN ", " NO "), "Error Ocurred")`.
+
+`r mm0.p01$f99` was the functional score corresponding to the probability of non functional at 99% and `r mm0.p01$f1` was the functional score corresponding to the probability of non functional at 1%.
+
+`r mm0.p01$f98` was the functional score corresponding to the probability of non functional at 98% and `r mm0.p01$f2` was the functional score corresponding to the probability of non functional at 2%.
+
+`r mm0.p01$f95` was the functional score corresponding to the probability of non functional at 95% and `r mm0.p01$f5` was the functional score corresponding to the probability of non functional at 5%.
+
+
+If we use these two thresholds to classify the variants of synonymous, stopgain and missense. 
+
+First, 1-99% cutoff
+Second, 2-98% cutoff
+Third, 5-95% cutoff
+
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+variants on chunling's list are included.
+
+```{r MixModel2.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+temp <- rbind(temp, temp2)
+
+
+temp$ctype <- ifelse(temp$functional.score>mm0.p01$f1, "neutural", 
+                     ifelse(temp$functional.score>mm0.p01$f99, "intermediate", "pathogenic"))
+
+
+temp$ctype2 <- ifelse(temp$functional.score>mm0.p01$f2, "neutural", 
+                     ifelse(temp$functional.score>mm0.p01$f98, "intermediate", "pathogenic"))
+
+temp$ctype3 <- ifelse(temp$functional.score>mm0.p01$f5, "neutural", 
+                     ifelse(temp$functional.score>mm0.p01$f95, "intermediate", "pathogenic"))
+
+
+temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+
+temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+tb <- table(truth = temp$EventType,pred = temp$ctype)
+print(tb)
+
+tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+print(tb2)
+tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+print(tb3)
+```
+
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- apply cutoffs to clinvar data: ", ""))`
+
+
+```{r MixModel2.dc.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)) {
+  temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+  
+  temp$ctype <- ifelse(temp$functional.score>mm0.p01$f1, "neutural", 
+                       ifelse(temp$functional.score>mm0.p01$f99, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype2 <- ifelse(temp$functional.score>mm0.p01$f2, "neutural", 
+                       ifelse(temp$functional.score>mm0.p01$f98, "intermediate", "pathogenic"))
+  
+  temp$ctype3 <- ifelse(temp$functional.score>mm0.p01$f5, "neutural", 
+                       ifelse(temp$functional.score>mm0.p01$f95, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+  
+  tb <- table( truth = temp$type, pred=temp$ctype)
+  print(tb)
+  tb2 <- table( truth = temp$type, pred = temp$ctype2)
+  print(tb2)
+  tb3 <- table( truth = temp$type, pred = temp$ctype3)
+  print(tb3)
+}
+
+```
+
+
+#### Data driven with prior 0.2
+
+Based on distribution from StopGain and synonymous non splicing region (spliceR == FALSE), we also build mixture model.
+
+```{r MixModel.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+mm0.p02 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "EventType", casen = "StopGain", controln = "Synonymous", MM = params$MM, lambda = "0.2")
+D14vsLib_fs.2.av$posteriorP_p02= mm0.p02$data$posteriorP
+D14vsLib_fs.2.av$likelihoodRatio= mm0.p02$data$likelihoodRatio ##<- D14vsLib_fs.2.av %>% mutate(posteriorP_p02= mm0.p02$data$posteriorP) %>% mutate(likelihoodRatio= mm0.p02$data$likelihoodRatio)
+```
+
+`r paste0("There is",  ifelse(mm0.p02$error.occured, " AN ", " NO "), "Error Ocurred")`.
+
+`r mm0.p02$f99` was the functional score corresponding to the probability of non functional at 99% and `r mm0.p02$f1` was the functional score corresponding to the probability of non functional at 1%.
+
+`r mm0.p02$f98` was the functional score corresponding to the probability of non functional at 98% and `r mm0.p02$f2` was the functional score corresponding to the probability of non functional at 2%.
+
+`r mm0.p02$f95` was the functional score corresponding to the probability of non functional at 95% and `r mm0.p02$f5` was the functional score corresponding to the probability of non functional at 5%.
+
+
+If we use these two thresholds to classify the variants of synonymous, stopgain and missense. 
+
+First, 1-99% cutoff
+Second, 2-98% cutoff
+Third, 5-95% cutoff
+
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+variants on chunling's list are included.
+
+```{r MixModel2.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+temp <- rbind(temp, temp2)
+
+
+temp$ctype <- ifelse(temp$functional.score>mm0.p02$f1, "neutural", 
+                     ifelse(temp$functional.score>mm0.p02$f99, "intermediate", "pathogenic"))
+
+
+temp$ctype2 <- ifelse(temp$functional.score>mm0.p02$f2, "neutural", 
+                     ifelse(temp$functional.score>mm0.p02$f98, "intermediate", "pathogenic"))
+
+temp$ctype3 <- ifelse(temp$functional.score>mm0.p02$f5, "neutural", 
+                     ifelse(temp$functional.score>mm0.p02$f95, "intermediate", "pathogenic"))
+
+
+temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+
+temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+tb <- table(truth = temp$EventType,pred = temp$ctype)
+print(tb)
+
+tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+print(tb2)
+tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+print(tb3)
+```
+
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- apply cutoffs to clinvar data: ", ""))`
+
+
+```{r MixModel2.dc.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)){
+  temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+  
+  temp$ctype <- ifelse(temp$functional.score>mm0.p02$f1, "neutural", 
+                       ifelse(temp$functional.score>mm0.p02$f99, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype2 <- ifelse(temp$functional.score>mm0.p02$f2, "neutural", 
+                       ifelse(temp$functional.score>mm0.p02$f98, "intermediate", "pathogenic"))
+  
+  temp$ctype3 <- ifelse(temp$functional.score>mm0.p02$f5, "neutural", 
+                       ifelse(temp$functional.score>mm0.p02$f95, "intermediate", "pathogenic"))
+  
+  
+  temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+  
+  tb <- table( truth = temp$type, pred=temp$ctype)
+  print(tb)
+  tb2 <- table( truth = temp$type, pred = temp$ctype2)
+  print(tb2)
+  tb3 <- table( truth = temp$type, pred = temp$ctype3)
+  print(tb3)
+}
+
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  cat("\n")
+  cat("#### ClinVar Data driven\n")
+  
+  cat("Based on distribution from Clinvar (pathogentic) and (benign), we also build mixture model.\n")
+  
+  cat("Exclude the spliceR and variants on chunling's list when build model.\n")
+}
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+  temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(type %in% c("Pathogenic", "Benign")) %>% filter(spliceR == FALSE) 
+  if(!is.null(params$vexclude)){
+      temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  
+  temp$type <- factor(temp$type, levels = c("Pathogenic", "Benign"))
+  
+  cat('1. Clinvar variants in our Data\n')
+  
+  table( temp$EventType, temp$type, temp$Exon)
+  
+  cat('2. Use Clinvar variants for mixture model\n')
+  
+  table(temp$type)
+}
+```
+
+
+```{r MixModel.C1, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  p <- temp %>%
+    ggplot( aes(x=functional.score, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+    scale_fill_manual(values=c(  "#69b3a2", "red")) +  ggtitle ( "functional.score by clinvar classification")
+  ggplotly(p)
+  
+  
+  
+  mm0.c <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "type", casen = "Pathogenic", controln = "Benign", MM = params$MM, lambda = "data")
+  D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(CposteriorP= mm0.c$data$posteriorP)
+}
+```
+
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+   cat("\n")
+  
+  cat(paste0("There is",  ifelse(mm0.c$error.occured, " AN ", " NO "), "Error Ocurred\n"))
+  
+
+  cat(paste0(mm0.c$f99, " was the functional score corresponding to the probability of non functional at 99% and ", mm0.c$f1, " was the functional score corresponding to the probability of non functional at 1%.\n"))
+
+  cat(paste0(mm0.c$f98, " was the functional score corresponding to the probability of non functional at 98% and ", mm0.c$f2, " was the functional score corresponding to the probability of non functional at 2%.\n"))
+
+  cat(paste0(mm0.c$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.c$f5, " was the functional score corresponding to the probability of non functional at 5%.\n"))
+
+
+  cat("If we use these two thresholds to classify the variants of synonymous, stopgain and missense. \n")
+  
+  cat("First, 1-99% cutoff\n")
+  cat("Second, 2-98% cutoff\n")
+  cat("Third, 5-95% cutoff\n")
+  
+  cat("Note: Splice regions are included in Missense, not stopgain nor synonymous variants on chunling's list are included.\n")
+
+}
+
+```
+
+```{r MixModel2.C, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!mm0.c$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+    
+    tb <- table(truth = temp$EventType,pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile),"- Apply cutoffs to clinvar data excluding spliceR\n", ""))`
+
+```{r MixModel2.Cc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!mm0.c$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    
+    tb <- table(truth = temp$type, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$type, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table( truth = temp$type, pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+   cat("\n")
+  
+  cat("#### ClinVar Data driven with prior 0.1\n")
+  
+  cat("Based on distribution from Clinvar (pathogentic) and (benign), we also build mixture model.\n")
+  
+  cat("Exclude the spliceR and variants on chunling's list when build model.\n")
+}
+```
+
+
+```{r}
+if(!is.null(params$clinvarfile)){
+  temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(type %in% c("Pathogenic", "Benign")) %>% filter(spliceR == FALSE) 
+  if(!is.null(params$vexclude)){
+      temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  
+  temp$type <- factor(temp$type, levels = c("Pathogenic", "Benign"))
+  
+  cat("1. Clinvar variants in our Data\n")
+  
+  table(temp$EventType, temp$type, temp$Exon)
+  
+  cat("2. Use Clinvar variants for mixture model with prior 0.1\n")
+  
+  table(temp$type)
+}
+
+```
+
+
+
+```{r MixModel.C1.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+mm0.c.p01 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "type", casen = "Pathogenic", controln = "Benign", MM = params$MM, lambda = "0.1")
+D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(CposteriorP_p01= mm0.c.p01$data$posteriorP)
+}
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+cat( paste0("There is",  ifelse(mm0.c.p01$error.occured, " AN ", " NO "), "Error Ocurred.\n"))
+
+cat( paste0( mm0.c.p01$f99, " was the functional score corresponding to the probability of non functional at 99% and ", mm0.c.p01$f1, " was the functional score corresponding to the probability of non functional at 1%.\n"))
+
+cat( paste0( mm0.c.p01$f98, " was the functional score corresponding to the probability of non functional at 98% and ", mm0.c.p01$f2, " was the functional score corresponding to the probability of non functional at 2%.\n"))
+
+cat( paste0( mm0.c.p01$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.c.p01$f5, " was the functional score corresponding to the probability of non functional at 5%.\n"))
+
+
+cat("If we use these two thresholds to classify the variants of synonymous, stopgain and missense. \n")
+
+cat("First, 1-99% cutoff.\n")
+cat("Second, 2-98% cutoff.\n")
+cat("Third, 5-95% cutoff.\n")
+
+cat("Note: Splice regions are included in Missense, not stopgain nor synonymous
+variants on chunling's list are included.\n")
+
+}
+
+```
+
+```{r MixModel2.C.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!mm0.c.p01$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c.p01$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c.p01$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c.p01$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+    
+    tb <- table(truth = temp$EventType,pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- Apply cutoffs to clinvar data excluding spliceR", ""))`
+
+```{r MixModel2.Cc.p01, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  
+  if(!mm0.c.p01$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c.p01$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c.p01$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c.p01$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p01$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    
+    tb <- table(truth = temp$type, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$type, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table( truth = temp$type, pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  
+   cat("\n")
+  
+  cat("#### ClinVar Data driven with prior 0.2\n")
+
+cat("Based on distribution from Clinvar (pathogentic) and (benign), we also build mixture model.\n")
+
+cat("Exclude the spliceR and variants on chunling's list when build model.\n")
+}
+
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+  temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(type %in% c("Pathogenic","Benign")) %>% filter(spliceR == FALSE) 
+  if(!is.null(params$vexclude)){
+      temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  
+  temp$type <- factor(temp$type, levels = c("Pathogenic", "Benign"))
+  cat("1. Clinvar variants in our Data\n")
+  
+  table( temp$EventType, temp$type, temp$Exon)
+  cat("2. Use Clinvar variants for mixture model\n")
+  
+  table(temp$type)
+}
+
+```
+
+```{r MixModel.C1.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  mm0.c.p02 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "type", casen = "Pathogenic", controln = "Benign", MM = params$MM, lambda = "0.2")
+  D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(CposteriorP_p02= mm0.c.p02$data$posteriorP) %>% mutate(ClikelihoodRatio= mm0.c.p02$data$likelihoodRatio)
+}
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  cat("\n")
+  cat(paste0("There is",  ifelse(mm0.c.p02$error.occured, " AN ", " NO "), "Error Ocurred.\n"))
+
+  cat(paste0(mm0.c.p02$f99, " was the functional score corresponding to the probability of non functional at 99% and ", mm0.c.p02$f1, " was the functional score corresponding to the probability of non functional at 1%.\n"))
+
+  cat(paste0( mm0.c.p02$f98, " was the functional score corresponding to the probability of non functional at 98% and ",  mm0.c.p02$f2, " was the functional score corresponding to the probability of non functional at 2%.\n"))
+
+  cat(paste0(mm0.c.p02$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.c.p02$f5, " was the functional score corresponding to the probability of non functional at 5%.\n"))
+
+
+  cat("If we use these two thresholds to classify the variants of synonymous, stopgain and missense. .\n")
+
+  cat("First, 1-99% cutoff.\n")
+  cat("Second, 2-98% cutoff.\n")
+  cat("Third, 5-95% cutoff.\n")
+  
+  cat("Note: Splice regions are included in Missense, not stopgain nor synonymous variants on chunling's list are included..\n")
+}
+
+```
+
+
+```{r MixModel2.C.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!mm0.c.p02$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c.p02$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c.p02$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c.p02$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+    
+    tb <- table(truth = temp$EventType,pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$EventType,pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$EventType,pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- Apply cutoffs to clinvar data excluding spliceR", ""))`
+
+```{r MixModel2.Cc.p02, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!mm0.c.p02$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.c.p02$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.c.p02$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.c.p02$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.c.p02$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    
+    tb <- table(truth = temp$type, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$type, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table( truth = temp$type, pred = temp$ctype3)
+    print(tb3)
+  }
+}
+```
+
+
+
+
+```{r, results = 'asis',  fig.width=5, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+  if(!is.null(params$HDRfile)){
+   cat("\n")
+    cat("#### HDR data", "\n")
+    cat("\n")
+    
+    temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(htype %in% c("Abnormal", "Normal")) %>% filter(spliceR == FALSE) 
+    if(!is.null(params$vexclude)){
+        temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+    }
+  }
+}
+
+```
+
+`r ifelse(!is.null(params$HDRfile), " 1. HDR variants in our Data", "")`
+
+```{r}
+if(!is.null(params$HDRfile)){
+  print(table( temp$EventType, temp$htype, temp$Exon))
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), " 2. Use HDR variants for mixture model" , "")`
+
+```{r,  fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  print(table(temp$htype))
+
+  p <- temp %>%
+    ggplot( aes(x=functional.score, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+    scale_fill_manual(values=c(  "#69b3a2", "red")) +  ggtitle ( "functional.score by clinvar classification")
+  ggplotly(p)
+
+  mm0.h <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "htype", casen = "Abnormal", controln = "Normal", MM = params$MM, lambda = "data")
+  D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(HposteriorP= mm0.h$data$posteriorP)
+
+}
+```
+
+```{r, results = 'asis', message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+
+  
+  cat(paste0("There is",  ifelse(mm0.h$error.occured, " AN ", " NO "), "Error Ocurred  \n"))
+  cat(paste0(mm0.h$f99, " was the functional score corresponding to the probability of non functional at 99% and ",  mm0.h$f1, " was the functional score corresponding to the probability of non functional at 1%. \n"))
+
+  cat(paste0(mm0.h$f98,"  was the functional score corresponding to the probability of non functional at 98% and ",  mm0.h$f2, " was the functional score corresponding to the probability of non functional at 2%. \n"))
+  
+  cat(paste0( mm0.h$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.h$f5," was the functional score corresponding to the probability of non functional at 5%. \n"))
+  
+  cat("\n If we use these two thresholds to classify the variants of synonymous, stopgain and missense. \n")
+
+  cat("\n First, 1-99% cutoff . \n")
+  cat("\n Second, 2-98% cutoff . \n")
+  cat("\n Third, 5-95% cutoff . \n")
+  
+  cat("\n Note: Splice regions are included in Missense, not stopgain nor synonymous
+  variants on chunling's list are included.. \n")
+
+}
+```
+
+```{r, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  if(!mm0.h$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.h$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.h$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.h$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.h$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.h$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.h$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$htype <- factor(temp$htype, levels = c("Abnormal", "Normal"))
+    cat("\n")
+    tb <- table(truth = temp$htype, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$htype, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$htype, pred = temp$ctype3)
+    print(tb3)
+  }
+
+}
+
+```
+
+`r ifelse(!is.null(params$HDRfile), " 3. Use HDR variants for mixture model with prior 0.1" , "")`
+
+```{r,  fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  mm0.h.p01 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "htype", casen = "Abnormal", controln = "Normal", MM = params$MM, lambda = "0.1")
+  D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(HposteriorP_p01= mm0.h.p01$data$posteriorP)
+
+}
+```
+
+```{r, results = 'asis', message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+
+  
+  cat(paste0("There is",  ifelse(mm0.h.p01$error.occured, " AN ", " NO "), "Error Ocurred  \n"))
+  cat(paste0(mm0.h.p01$f99, " was the functional score corresponding to the probability of non functional at 99% and ",  mm0.h.p01$f1, " was the functional score corresponding to the probability of non functional at 1%. \n"))
+
+  cat(paste0(mm0.h.p01$f98,"  was the functional score corresponding to the probability of non functional at 98% and ",  mm0.h.p01$f2, " was the functional score corresponding to the probability of non functional at 2%. \n"))
+  
+  cat(paste0( mm0.h.p01$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.h.p01$f5," was the functional score corresponding to the probability of non functional at 5%. \n"))
+  
+  cat("\n If we use these two thresholds to classify the variants of synonymous, stopgain and missense. \n")
+
+  cat("\n First, 1-99% cutoff . \n")
+  cat("\n Second, 2-98% cutoff . \n")
+  cat("\n Third, 5-95% cutoff . \n")
+  
+  cat("\n Note: Splice regions are included in Missense, not stopgain nor synonymous
+  variants on chunling's list are included.. \n")
+
+}
+```
+
+```{r, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  if(!mm0.h.p01$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.h.p01$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p01$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.h.p01$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p01$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.h.p01$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p01$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$htype <- factor(temp$htype, levels = c("Abnormal", "Normal"))
+    cat("\n")
+    tb <- table(truth = temp$htype, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$htype, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$htype, pred = temp$ctype3)
+    print(tb3)
+  }
+
+}
+
+```
+
+`r ifelse(!is.null(params$HDRfile), " 4. Use HDR variants for mixture model with prior 0.2" , "")`
+
+```{r,  fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+
+  mm0.h.p02 <- mmfun2(data = D14vsLib_fs.2.av, typecolumn = "htype", casen = "Abnormal", controln = "Normal", MM = params$MM, lambda = "0.1")
+  D14vsLib_fs.2.av <- D14vsLib_fs.2.av %>% mutate(HposteriorP_p02= mm0.h.p02$data$posteriorP) %>% mutate(HlikelihoodRatio= mm0.h.p02$data$likelihoodRatio)
+
+}
+```
+
+```{r, results = 'asis', message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+
+  
+  cat(paste0("There is",  ifelse(mm0.h.p02$error.occured, " AN ", " NO "), "Error Ocurred  \n"))
+  cat(paste0(mm0.h.p02$f99, " was the functional score corresponding to the probability of non functional at 99% and ",  mm0.h.p02$f1, " was the functional score corresponding to the probability of non functional at 1%. \n"))
+
+  cat(paste0(mm0.h.p02$f98,"  was the functional score corresponding to the probability of non functional at 98% and ",  mm0.h.p02$f2, " was the functional score corresponding to the probability of non functional at 2%. \n"))
+  
+  cat(paste0( mm0.h.p02$f95, " was the functional score corresponding to the probability of non functional at 95% and ", mm0.h.p02$f5," was the functional score corresponding to the probability of non functional at 5%. \n"))
+  
+  cat("\n If we use these two thresholds to classify the variants of synonymous, stopgain and missense. \n")
+
+  cat("\n First, 1-99% cutoff . \n")
+  cat("\n Second, 2-98% cutoff . \n")
+  cat("\n Third, 5-95% cutoff . \n")
+  
+  cat("\n Note: Splice regions are included in Missense, not stopgain nor synonymous
+  variants on chunling's list are included.. \n")
+
+}
+```
+
+```{r, message=FALSE, warning=FALSE}
+if(!is.null(params$HDRfile)){
+  if(!mm0.h.p02$error.occured){
+    temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+    
+    temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+    
+    temp <- rbind(temp, temp2)
+    
+    
+    temp$ctype <- ifelse(temp$functional.score>mm0.h.p02$f1, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p02$f99, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype2 <- ifelse(temp$functional.score>mm0.h.p02$f2, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p02$f98, "intermediate", "pathogenic"))
+    
+    temp$ctype3 <- ifelse(temp$functional.score>mm0.h.p02$f5, "neutural", 
+                         ifelse(temp$functional.score>mm0.h.p02$f95, "intermediate", "pathogenic"))
+    
+    
+    temp$ctype <- factor(temp$ctype, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype2 <- factor(temp$ctype2, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$ctype3 <- factor(temp$ctype3, levels = c("pathogenic", "intermediate", "neutural"))
+    
+    temp$htype <- factor(temp$htype, levels = c("Abnormal", "Normal"))
+    cat("\n")
+    tb <- table(truth = temp$htype, pred = temp$ctype)
+    print(tb)
+    
+    tb2 <- table(truth = temp$htype, pred = temp$ctype2)
+    print(tb2)
+    tb3 <- table(truth = temp$htype, pred = temp$ctype3)
+    print(tb3)
+  }
+
+}
+
+```
+
+
+### 4.3 Precision
+
+Find cutoff of functional scores with precision of 0.95, 0.98 and 0.99 for both StopGain and Synonymous using our data and Clinvar subsets and HDR subsets if there are any. 
+```{r prec_fun}
+
+myprec <- function(dt, typecolumn, casen, controln, precisions = c(0.9, 0.95, 0.98, 0.99)){
+  temp <- dt
+  temp$type <- pull(dt, typecolumn)
+  score = c(temp$functional.score[which(temp$type == casen)], temp$functional.score[which(temp$type == controln)])
+  label = c(temp$type[which(temp$type == casen)], temp$type[temp$type == controln])
+  label = factor(label, levels = c(casen, controln))
+  weights = c(1, 1)
+  
+  cutoffs = precisionBasedThreshold(score, label, weights, precisions)
+  
+  p <- temp %>%
+    ggplot( aes(x=functional.score, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+    geom_vline(xintercept=c(cutoffs[,casen]), linetype="dashed", color = "red") + ## upper stopgain
+    geom_vline(xintercept=c(cutoffs[, controln]), linetype="dashed", color = "green") + ## lower synonymous
+    scale_fill_manual(values=c("#69b3a2", "red")) +  ggtitle ( "functional.score with precision cutoffs(weight 1)")
+  ggplotly(p)
+  
+  weights = c(1, sum(temp$type ==casen) / sum(temp$type == controln))
+  cutoffs2 = precisionBasedThreshold(score, label, weights, precisions)
+  
+  p <- temp %>%
+    ggplot( aes(x=functional.score, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+    geom_vline(xintercept=c(cutoffs2[,casen]), linetype="dashed", color = "red") + ## upper stopgain
+    geom_vline(xintercept=c(cutoffs2[, controln]), linetype="dashed", color = "green") + ## lower synonymous
+    scale_fill_manual(values=c("#69b3a2", "red")) +  ggtitle ( "functional.score with precision cutoffs (data weight)")
+  ggplotly(p)
+  
+  weights = c(1, 3*sum(temp$type ==casen) / sum(temp$type == controln))
+  cutoffs3 = precisionBasedThreshold(score, label, weights, precisions)
+  
+  p <- temp %>%
+    ggplot( aes(x=functional.score, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity', binwidth = 0.1) +
+    geom_vline(xintercept=c(cutoffs3[,casen]), linetype="dashed", color = "red") + ## upper stopgain
+    geom_vline(xintercept=c(cutoffs3[, controln]), linetype="dashed", color = "green") + ## lower synonymous
+    scale_fill_manual(values=c("#69b3a2", "red")) +  ggtitle ( "functional.score with precision cutoffs (alpha weight)")
+  ggplotly(p)
+  
+  return(list(cutoffs = cutoffs, cutoffs2 = cutoffs2, cutoffs3 = cutoffs3))
+}
+
+```
+
+#### Data driven
+
+Based on distribution from StopGain and synonymous non splicing region (spliceR == FALSE), excluding variants on chunling's list, we also build precision cutoffs.
+
+```{r prec_data, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% filter(EventType %in% c("StopGain", "Synonymous")) %>% 
+  arrange(functional.score) %>% filter(spliceR== FALSE) 
+if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+}
+
+cfs <- myprec(temp, typecolumn = "EventType", casen = "StopGain", controln = "Synonymous")
+```
+
+
+for precision cutoffs with weight ratio of 1, 1.
+```{r}
+print(cfs$cutoffs)
+```
+for precision cutoffs with weight ratio of data (1, `r sum(temp$EventType == "StopGain") / sum(temp$EventType == "Synonymous")`).
+```{r}
+print(cfs$cutoffs2)
+```
+for precision cutoffs with weight ratio of data (1, `r 3*sum(temp$EventType == "StopGain") / sum(temp$EventType == "Synonymous")`).
+```{r}
+print(cfs$cutoffs3)
+```
+
+Applying the cutoffs on three types together (MAVE data).
+
+- cutoffs with weight ratio of 1. 
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+
+
+
+```{r prec_data2, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+temp <- rbind(temp, temp2)
+precisions = c(0.9, 0.95, 0.98, 0.99)
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+```
+
+- cutoffs with weight ratio of data ratio. 
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+
+```{r prec_data2.1, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs2[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs2[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+```
+
+- cutoffs with weight ratio of alpha ratio. 
+Note: Splice regions are included in Missense, not stopgain nor synonymous
+
+```{r prec_data2.1a, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs3[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs3[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  
+  cat("\n")
+    
+  cat("Applying the cutoffs on Clinvar data excluding spliceR.\n")
+  
+  cat("- cutoffs with weight ratio of 1.\n")
+
+}
+
+```
+
+
+
+```{r prec_data2c, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)){
+  
+temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- cutoffs with weight ratio of data ratio. \n", "\n"))`
+
+```{r prec_data2.1cc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs2[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs2[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- cutoffs with weight ratio of alpha ratio.  \n", "\n"))`
+
+
+
+```{r prec_data2.1acc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs$cutoffs3[as.character(ri), "Synonymous"], "neutural", 
+                     ifelse(temp$functional.score>cfs$cutoffs3[as.character(ri), "StopGain"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  cat("\n")
+  
+  cat("#### ClinVar Data driven\n")
+  
+  cat("Based on distribution from Clinvar (pathogentic) and (benign), we also build precision model. \n")
+  cat("Exlcude spliceR and variants on chunling's list.\n")
+}
+```
+
+
+```{r prec.clinvar, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$clinvarfile)){
+temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(type %in% c("Pathogenic", "Benign")) %>% filter(spliceR == FALSE) 
+if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+}
+
+cfs.c <- myprec(temp, typecolumn = "type", casen = "Pathogenic", controln = "Benign")
+
+cat("  for precision cutoffs with weight ratio of 1, 1.\n")
+print(cfs.c$cutoffs)
+cat("\n")
+cat(paste0("for precision cutoffs with weight ratio of data (1,", sum(temp$type == "Pathogenic") / sum(temp$type == "Benign")))
+cat("\n")
+print(cfs.c$cutoffs2)
+
+cat(paste0("for precision cutoffs with weight ratio of data (1, ", 3*sum(temp$type == "Pathogenic") / sum(temp$type == "Benign")))
+cat("\n")
+print(cfs.c$cutoffs3)
+}
+
+```
+
+```{r}
+
+if(!is.null(params$clinvarfile)){
+  cat("\n")
+  cat("Applying the cutoffs on three types together for MAVE data.\n")
+  
+  cat("- cutoffs with weight ratio of 1. \n")
+  cat("Note: Splice regions are included in Missense, not stopgain nor synonymous\n")
+
+}
+```
+
+
+```{r prec_data2.c, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+temp <- rbind(temp, temp2)
+
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+   cat("\n")
+  cat("- cutoffs with weight ratio of data ratio. \n")
+    
+  cat("Note: Splice regions are included in Missense, not stopgain nor synonymous\n")
+
+}
+```
+
+
+```{r prec_data2.1c, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs2[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs2[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+   cat("\n")
+cat("- cutoffs with weight ratio of alpha ratio. \n")
+cat("Note: Splice regions are included in Missense, not stopgain nor synonymous \n")
+
+}
+```
+
+
+```{r prec_data2.1ca, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs3[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs3[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+
+  tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+  print(tb)
+}
+}
+```
+
+```{r}
+if(!is.null(params$clinvarfile)){
+ cat("\n")
+  cat("Applying the cutoffs on Clinvar data\n")
+  
+  cat("- cutoffs with weight ratio of 1. \n")
+}
+
+```
+
+    
+
+```{r prec_data2.ccc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+temp <- D14vsLib_fs.2 %>% filter(type %in% c("Benign", "Pathogenic")) %>% filter(spliceR == FALSE) 
+
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$type <-factor(temp$type, levels = c("Pathogenic", "Benign"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+  print(tb)
+}
+}
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- cutoffs with weight ratio of data ratio. \n", "\n"))`
+
+```{r prec_data2.1ccc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs2[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs2[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$type <-factor(temp$type, levels = c("Pathogenic", "Benign"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+  print(tb)
+}
+}
+
+```
+
+`r cat(ifelse(!is.null(params$clinvarfile), "- cutoffs with weight ratio of alpha ratio. \n", "\n"))`
+
+```{r prec_data2.1cacc, include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+if(!is.null(params$clinvarfile)){
+for(ri in precisions){
+  cat("\n", "precision ", ri, "\n")
+  temp$ctype.p <- ifelse(temp$functional.score>cfs.c$cutoffs3[as.character(ri), "Benign"], "neutural", 
+                     ifelse(temp$functional.score>cfs.c$cutoffs3[as.character(ri), "Pathogenic"], "intermediate", "pathogenic"))
+  temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$type <-factor(temp$type, levels = c("Pathogenic", "Benign"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+  print(tb)
+}
+}
+```
+
+
+
+
+```{r, results = 'asis',  include=TRUE, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+
+if(!is.null(params$HDRfile)){
+
+  cat("\n")
+  cat("#### HDR Data driven\n")
+
+  cat("\n")
+  cat("Based on distribution from HDR data (Abnormal) and (Normal), we also build precision model. Exlcude spliceR and variants on chunling's list.\n")
+  temp <- D14vsLib_fs.2 %>% filter(!is.na(functional.score)) %>% arrange(functional.score) %>% filter(htype %in% c("Abnormal", "Normal")) %>% filter(spliceR == FALSE) 
+  if(!is.null(params$vexclude)){
+    temp <- temp %>%  filter(!uPOS %in% Varaints_to_be_excluded_when_use_MAVE_internal_control_to_build_model$uPOS)  ## remove variants on chunling's list
+  }
+  
+  cfs.h <- myprec(temp, typecolumn = "htype", casen = "Abnormal", controln = "Normal")
+}
+```
+
+
+`r print(ifelse(!is.null(params$HDRfile), " for precision cutoffs with weight ratio of 1, 1. ", ""))`
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  print(cfs.h$cutoffs)
+}
+```
+
+
+`r ifelse(!is.null(params$HDRfile), paste0(" for precision cutoffs with weight ratio of data: 1, ", sum(temp$htype == "Abnormal") / sum(temp$htype == "Normal"), " .."), "")` 
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  print(cfs.h$cutoffs2)
+}
+```
+
+`r ifelse(!is.null(params$HDRfile),  paste0(" for precision cutoffs with weight ratio of data: 1, ", 3*sum(temp$htype == "Abnormal") / sum(temp$htype == "Normal"), " .."), "")`
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  print(cfs.h$cutoffs3)
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), " Applying the cutoffs on three types together for MAVE data. ", "")`
+
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight ratio of 1. ", "")`
+
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")`
+
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  temp <- D14vsLib_fs.2 %>% filter(EventType %in% c("Synonymous", "StopGain")) %>% filter(spliceR == FALSE) 
+
+  temp2 <- D14vsLib_fs.2 %>% filter(EventType %in% c("Missense")) 
+
+  temp <- rbind(temp, temp2)
+
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+  
+    tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+    print(tb)
+  }
+}
+
+```
+
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight ratio of data ratio.. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")` 
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs2[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs2[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+  
+    tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+    print(tb)
+  }
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight ratio of alpha ratio.. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")` 
+
+  
+```{r}
+
+if(!is.null(params$HDRfile)){
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs3[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs3[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+    temp$EventType <-factor(temp$EventType, levels = c("StopGain", "Missense", "Synonymous"))
+  
+    tb <- table(truth = temp$EventType, pred = temp$ctype.p)
+    print(tb)
+  }
+}
+```
+
+
+`r ifelse(!is.null(params$HDRfile), "Applying the cutoffs on HDR data. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight ratio of 1. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")` 
+
+```{r}
+
+if(!is.null(params$HDRfile)){
+  temp <- D14vsLib_fs.2 %>% filter(htype %in% c("Abnormal", "Normal")) %>% filter(spliceR == FALSE) 
+
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+  temp$type <-factor(temp$htype, levels = c("Abnormal", "Normal"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+    print(tb)
+  }
+  
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight ratio of data ratio. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")` 
+ 
+```{r}
+
+if(!is.null(params$HDRfile)){ 
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs2[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs2[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+      temp$type <-factor(temp$htype, levels = c("Abnormal", "Normal"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+    print(tb)
+    
+  }
+  
+}
+```
+
+`r ifelse(!is.null(params$HDRfile), " - cutoffs with weight alpha ratio. ", "")` 
+`r ifelse(!is.null(params$HDRfile), " Note: Splice regions are included in Missense, not stopgain nor synonymous. ", "")` 
+
+```{r}
+
+if(!is.null(params$HDRfile)){ 
+  for(ri in precisions){
+    cat("\n", "precision ", ri, "\n")
+    temp$ctype.p <- ifelse(temp$functional.score>cfs.h$cutoffs3[as.character(ri), "Normal"], "neutural", 
+                       ifelse(temp$functional.score>cfs.h$cutoffs3[as.character(ri), "Abnormal"], "intermediate", "pathogenic"))
+    temp$ctype.p <- factor(temp$ctype.p, levels = c("pathogenic", "intermediate", "neutural"))
+      temp$type <-factor(temp$htype, levels = c("Abnormal", "Normal"))
+
+  tb <- table(truth = temp$type, pred = temp$ctype.p)
+    print(tb)
+  }
+}
+
+```
+
+
+
+
+```{r}
+## output merge with raw D14_v_lib
+out <- merge(D14vsLib_fs.2.av, dt2.av.temp) 
+if(nmax == 6){
+  out <- out %>% rowwise() %>%  dplyr::select(-E1, -E2, -E3, -E4, -E5, -E6) %>% relocate(functional.score, .after = R6_ce_norm)
+}else if(nmax == 5){
+  out <- out %>% rowwise() %>%  dplyr::select(-E1, -E2, -E3, -E4, -E5) %>% relocate(functional.score, .after = R5_ce_norm)
+}else if(nmax == 4){
+  out <- out %>% rowwise() %>%  dplyr::select(-E1, -E2, -E3, -E4) %>% relocate(functional.score, .after = R4_ce_norm)
+}else if(nmax == 3){
+  out <- out %>% rowwise() %>%  dplyr::select(-E1, -E2, -E3) %>% relocate(functional.score, .after = R3_ce_norm)
+}else if(nmax == 2){
+  out <- out %>% rowwise() %>%  dplyr::select(-E1, -E2) %>% relocate(functional.score, .after = R2_ce_norm)
+} else {
+  out <- out %>% rowwise() %>%  dplyr::select(-E1) %>% relocate(functional.score, .after = R1_ce_norm)
+}
+
+## output merge with raw counts
+## add the mm cutoffs
+## data
+Sout <- data.frame(m95.sg.pd = mm0$f95, m95.sn.pd = mm0$f5,
+                   m98.sg.pd = mm0$f98, m98.sn.pd = mm0$f2,
+                   m99.sg.pd = mm0$f99, m99.sn.pd = mm0$f1,
+                   m95.sg.p01= mm0.p01$f95, m95.sn.p01 = mm0.p01$f5,
+                   m98.sg.p01= mm0.p01$f98, m98.sn.p01 = mm0.p01$f2,
+                   m99.sg.p01= mm0.p01$f99, m99.sn.p01 = mm0.p01$f1,
+                   m95.sg.p02= mm0.p02$f95, m95.sn.p02 = mm0.p02$f5,
+                   m98.sg.p02= mm0.p02$f98, m98.sn.p02 = mm0.p02$f2,
+                   m99.sg.p02= mm0.p02$f99, m99.sn.p02 = mm0.p02$f1)
+if(!is.null(params$clinvarfile)){         
+                   ## clinvar
+Sout <- Sout %>% mutate(
+                   
+                   m95.sg.Cpd = mm0.c$f95, m95.sn.Cpd = mm0.c$f5,
+                   m98.sg.Cpd = mm0.c$f98, m98.sn.Cpd = mm0.c$f2,
+                   m99.sg.Cpd = mm0.c$f99, m99.sn.Cpd = mm0.c$f1,
+                   m95.sg.Cp01= mm0.c.p01$f95, m95.sn.Cp01 = mm0.c.p01$f5,
+                   m98.sg.Cp01= mm0.c.p01$f98, m98.sn.Cp01 = mm0.c.p01$f2,
+                   m99.sg.Cp01= mm0.c.p01$f99, m99.sn.Cp01 = mm0.c.p01$f1,
+                   m95.sg.Cp02= mm0.c.p02$f95, m95.sn.Cp02 = mm0.c.p02$f5,
+                   m98.sg.Cp02= mm0.c.p02$f98, m98.sn.Cp02 = mm0.c.p02$f2,
+                   m99.sg.Cp02= mm0.c.p02$f99, m99.sn.Cp02 = mm0.c.p02$f1)
+} else{
+  Sout <- Sout %>% mutate(m95.sg.Cpd = NA, m95.sn.Cpd = NA,
+                   m98.sg.Cpd = NA, m98.sn.Cpd = NA,
+                   m99.sg.Cpd = NA, m99.sn.Cpd = NA,
+                   m95.sg.Cp01= NA, m95.sn.Cp01 = NA,
+                   m98.sg.Cp01= NA, m98.sn.Cp01 = NA,
+                   m99.sg.Cp01= NA, m99.sn.Cp01 = NA,
+                   m95.sg.Cp02= NA, m95.sn.Cp02 = NA,
+                   m98.sg.Cp02= NA, m98.sn.Cp02 = NA,
+                   m99.sg.Cp02= NA, m99.sn.Cp02 = NA)
+}
+if(!is.null(params$HDRfile)){ 
+  Sout <- Sout %>% mutate(
+                   m95.sg.Hpd = mm0.h$f95, m95.sn.Hpd = mm0.h$f5,
+                   m98.sg.Hpd = mm0.h$f98, m98.sn.Hpd = mm0.h$f2,
+                   m99.sg.Hpd = mm0.h$f99, m99.sn.Hpd = mm0.h$f1,
+                   m95.sg.Hp01= mm0.h.p01$f95, m95.sn.Hp01 = mm0.h.p01$f5,
+                   m98.sg.Hp01= mm0.h.p01$f98, m98.sn.Hp01 = mm0.h.p01$f2,
+                   m99.sg.Hp01= mm0.h.p01$f99, m99.sn.Hp01 = mm0.h.p01$f1,
+                   m95.sg.Hp02= mm0.h.p02$f95, m95.sn.Hp02 = mm0.h.p02$f5,
+                   m98.sg.Hp02= mm0.h.p02$f98, m98.sn.Hp02 = mm0.h.p02$f2,
+                   m99.sg.Hp02= mm0.h.p02$f99, m99.sn.Hp02 = mm0.h.p02$f1)
+}
+
+                   ## add the precision cutoffs
+ Sout <- Sout %>% mutate(
+                   p90.sg.w1 = cfs$cutoffs["0.9", "StopGain"], p90.sn.w1 = cfs$cutoffs["0.9", "Synonymous"], 
+                   p95.sg.w1 = cfs$cutoffs["0.95", "StopGain"], p95.sn.w1 = cfs$cutoffs["0.95", "Synonymous"], 
+                   p98.sg.w1 = cfs$cutoffs["0.98", "StopGain"], p98.sn.w1 = cfs$cutoffs["0.98", "Synonymous"], 
+                   p99.sg.w1 = cfs$cutoffs["0.99", "StopGain"], p99.sn.w1 = cfs$cutoffs["0.99", "Synonymous"], 
+                   
+                   p90.sg.wd = cfs$cutoffs2["0.9", "StopGain"], p90.sn.wd = cfs$cutoffs2["0.9", "Synonymous"], 
+                   p95.sg.wd = cfs$cutoffs2["0.95", "StopGain"], p95.sn.wd = cfs$cutoffs2["0.95", "Synonymous"], 
+                   p98.sg.wd = cfs$cutoffs2["0.98", "StopGain"], p98.sn.wd = cfs$cutoffs2["0.98", "Synonymous"], 
+                   p99.sg.wd = cfs$cutoffs2["0.99", "StopGain"], p99.sn.wd = cfs$cutoffs2["0.99", "Synonymous"], 
+                   
+                   p90.sg.wa = cfs$cutoffs3["0.9", "StopGain"], p90.sn.wa = cfs$cutoffs3["0.9", "Synonymous"], 
+                   p95.sg.wa = cfs$cutoffs3["0.95", "StopGain"], p95.sn.wa = cfs$cutoffs3["0.95", "Synonymous"], 
+                   p98.sg.wa = cfs$cutoffs3["0.98", "StopGain"], p98.sn.wa = cfs$cutoffs3["0.98", "Synonymous"], 
+                   p99.sg.wa = cfs$cutoffs3["0.99", "StopGain"], p99.sn.wa = cfs$cutoffs3["0.99", "Synonymous"])
+ 
+if(!is.null(params$clinvarfile)){         
+                   ## clinvar
+Sout <- Sout %>% mutate(
+  
+                  p90.sg.w1.c = cfs.c$cutoffs["0.9", "Pathogenic"], p90.sn.w1.c = cfs.c$cutoffs["0.9", "Benign"], 
+                   p95.sg.w1.c = cfs.c$cutoffs["0.95", "Pathogenic"], p95.sn.w1.c = cfs.c$cutoffs["0.95", "Benign"], 
+                   p98.sg.w1.c = cfs.c$cutoffs["0.98", "Pathogenic"], p98.sn.w1.c = cfs.c$cutoffs["0.98", "Benign"], 
+                   p99.sg.w1.c = cfs.c$cutoffs["0.99", "Pathogenic"], p99.sn.w1.c = cfs.c$cutoffs["0.99", "Benign"], 
+                   
+                   p90.sg.wd.c = cfs.c$cutoffs2["0.9", "Pathogenic"], p90.sn.wd.c = cfs.c$cutoffs2["0.9", "Benign"], 
+                   p95.sg.wd.c = cfs.c$cutoffs2["0.95", "Pathogenic"], p95.sn.wd.c = cfs.c$cutoffs2["0.95", "Benign"], 
+                   p98.sg.wd.c = cfs.c$cutoffs2["0.98","Pathogenic"], p98.sn.wd.c = cfs.c$cutoffs2["0.98", "Benign"], 
+                   p99.sg.wd.c = cfs.c$cutoffs2["0.99", "Pathogenic"], p99.sn.wd.c = cfs.c$cutoffs2["0.99", "Benign"], 
+                   
+                   p90.sg.wa.c = cfs.c$cutoffs3["0.9", "Pathogenic"], p90.sn.wa.c = cfs.c$cutoffs3["0.9", "Benign"], 
+                   p95.sg.wa.c = cfs.c$cutoffs3["0.95", "Pathogenic"], p95.sn.wa.c = cfs.c$cutoffs3["0.95", "Benign"], 
+                   p98.sg.wa.c = cfs.c$cutoffs3["0.98","Pathogenic"], p98.sn.wa.c = cfs.c$cutoffs3["0.98", "Benign"], 
+                   p99.sg.wa.c = cfs.c$cutoffs3["0.99", "Pathogenic"], p99.sn.wa.c = cfs.c$cutoffs3["0.99", "Benign"]
+  
+)
+} else{
+  Sout <- Sout %>% mutate(
+                   p90.sg.w1.c = NA, p90.sn.w1.c = NA, 
+                   p95.sg.w1.c = NA, p95.sn.w1.c = NA, 
+                   p98.sg.w1.c = NA, p98.sn.w1.c = NA, 
+                   p99.sg.w1.c = NA, p99.sn.w1.c = NA, 
+                   
+                   p90.sg.wd.c = NA, p90.sn.wd.c = NA, 
+                   p95.sg.wd.c = NA, p95.sn.wd.c = NA, 
+                   p98.sg.wd.c = NA, p98.sn.wd.c = NA, 
+                   p99.sg.wd.c = NA, p99.sn.wd.c = NA, 
+                   
+                   p90.sg.wa.c = NA, p90.sn.wa.c = NA, 
+                   p95.sg.wa.c = NA, p95.sn.wa.c = NA, 
+                   p98.sg.wa.c = NA, p98.sn.wa.c = NA, 
+                   p99.sg.wa.c = NA, p99.sn.wa.c = NA)
+}
+
+
+## HDR
+if(!is.null(params$HDRfile)){
+  Sout$p90.sg.w1.h <- cfs.h$cutoffs["0.9", "Abnormal"]; Sout$p90.sn.w1.h <- cfs.h$cutoffs["0.9", "Normal"]; 
+  Sout$p95.sg.w1.h <- cfs.h$cutoffs["0.95", "Abnormal"]; Sout$p95.sn.w1.h <- cfs.h$cutoffs["0.95", "Normal"]; 
+  Sout$p98.sg.w1.h <- cfs.h$cutoffs["0.98", "Abnormal"]; Sout$p98.sn.w1.h <- cfs.h$cutoffs["0.98", "Normal"]; 
+  Sout$p99.sg.w1.h <- cfs.h$cutoffs["0.99", "Abnormal"]; Sout$p99.sn.w1.h <- cfs.h$cutoffs["0.99", "Normal"]; 
+  
+  Sout$p90.sg.wd.h <- cfs.h$cutoffs2["0.9", "Abnormal"]; Sout$p90.sn.wd.h <- cfs.h$cutoffs2["0.9", "Normal"]; 
+  Sout$p95.sg.wd.h <- cfs.h$cutoffs2["0.95", "Abnormal"]; Sout$p95.sn.wd.h <- cfs.h$cutoffs2["0.95", "Normal"]; 
+  Sout$p98.sg.wd.h <- cfs.h$cutoffs2["0.98","Abnormal"]; Sout$p98.sn.wd.h <- cfs.h$cutoffs2["0.98", "Normal"]; 
+  Sout$p99.sg.wd.h <- cfs.h$cutoffs2["0.99", "Abnormal"]; Sout$p99.sn.wd.h <- cfs.h$cutoffs2["0.99", "Normal"]; 
+  
+  Sout$p90.sg.wa.h <- cfs.h$cutoffs3["0.9", "Abnormal"]; Sout$p90.sn.wa.h <- cfs.h$cutoffs3["0.9", "Normal"]; 
+  Sout$p95.sg.wa.h <- cfs.h$cutoffs3["0.95", "Abnormal"]; Sout$p95.sn.wa.h <- cfs.h$cutoffs3["0.95", "Normal"]; 
+  Sout$p98.sg.wa.h <- cfs.h$cutoffs3["0.98","Abnormal"]; Sout$p98.sn.wa.h <- cfs.h$cutoffs3["0.98", "Normal"]; 
+  Sout$p99.sg.wa.h <- cfs.h$cutoffs3["0.99", "Abnormal"]; Sout$p99.sn.wa.h <- cfs.h$cutoffs3["0.99", "Normal"]; 
+}else{
+  Sout$p90.sg.w1.h <- Sout$p90.sn.w1.h <- Sout$p95.sg.w1.h <- Sout$p95.sn.w1.h <- Sout$p98.sg.w1.h <- Sout$p98.sn.w1.h <- Sout$p99.sg.w1.h <-  Sout$p99.sn.w1.h <- NA
+  Sout$p90.sg.wd.h <- Sout$p90.sn.wd.h <- Sout$p95.sg.wd.h <- Sout$p95.sn.wd.h <- Sout$p98.sg.wd.h <- Sout$p98.sn.wd.h <- Sout$p99.sg.wd.h <-  Sout$p99.sn.wd.h <- NA
+  Sout$p90.sg.wa.h <- Sout$p90.sn.wa.h <- Sout$p95.sg.wa.h <- Sout$p95.sn.wa.h <- Sout$p98.sg.wa.h <- Sout$p98.sn.wa.h <- Sout$p99.sg.wa.h <-  Sout$p99.sn.wa.h <- NA
+}
+
+write.csv(out, paste0(resdir, Ratio, "_fs_", Score_method, "_", (paste0(ifelse(Lab_curation == "No", "without", "with"), "_LabCureation_")), "E", gsub(", ", "", Exons), "_", params$loessSubset, "_", params$EventCount_Filter, "_MM_", params$MM, "_Outlierremove_",  params$Outlierremove,  "_extrafilter_", extraFilter,".csv"), row.names = FALSE)
+
+write.csv(Sout, paste0(resdir, "Cutoffs_", Ratio, "_fs_", Score_method, "_", (paste0(ifelse(Lab_curation == "No", "without", "with"), "_LabCureation_")), "E", gsub(", ", "", Exons), "_", params$loessSubset, "_", params$EventCount_Filter, "_MM_", params$MM, "_Outlierremove_",  params$Outlierremove,  "_extrafilter_", extraFilter,".csv"), row.names = FALSE)
+
+out2 <- out %>% filter(uPOS %in% D14vsLib_fs.2$uPOS)
+write.csv(out2, paste0(resdir, "SNV_", Ratio, "_fs_", Score_method, "_", (paste0(ifelse(Lab_curation == "No", "without", "with"), "_LabCureation_")), "E", gsub(", ", "", Exons), "_", params$loessSubset, "_", params$EventCount_Filter, "_MM_", params$MM, "_Outlierremove_",  params$Outlierremove,  "_extrafilter_", extraFilter,".csv"), row.names = FALSE)
+
+``` 
+
+Output metrics
+
+```{r}
+## output the metrics in one file
+if(!is.null(params$HDRfile)){
+  N_HDR = N_HDR
+  AUC_HDR=as.numeric(ROC0.h$auc)
+  sens_HDR=ROC0.h$sen
+  spec_HDR=ROC0.h$spec
+  confusion.matrix_roc_HDR = c(paste(as.vector((c(ROC0.h$tb[1,], ROC0.h$tb[2,]))), collapse = " "))
+  
+}else{
+  N_HDR <- AUC_HDR <- sens_HDR <-  spec_HDR <- NA
+  confusion.matrix_roc_HDR = ""
+}
+                                                   
+metrics <- data.frame(Exons = params$Exons,
+                      N_SNV = sum(!is.na(out2$functional.score)),
+                      EvenFilter = params$EventCount_Filter,
+                      vset = params$vset,
+                      Method = params$loessSubset,
+                      score = Score_method,
+                      Ratio = params$Ratio,
+                      MM = params$MM,
+                      Outlierremove = params$Outlierremove,
+                      extraFilter = params$extraFilter,
+                      AUC_data=as.numeric(ROC0$auc),
+                      sens_data=ROC0$sen,
+                      spec_data=ROC0$spec,
+                      confusion.matrix_roc_data = c(paste(as.vector((c(ROC0$tb[1,], ROC0$tb[2,]))), collapse = " ")))
+if(!is.null(params$clinvarfile)){ 
+  metrics <- metrics %>% mutate(
+                      AUC_clinvar=as.numeric(ROC0.c$auc),
+                      sens_clinvar=ROC0.c$sen,
+                      spec_clinvar=ROC0.c$spec,
+                      confusion.matrix_roc_clinvar = c(paste(as.vector((c(ROC0.c$tb[1,], ROC0.c$tb[2,]))), collapse = " ")))
+}else{
+   metrics <- metrics %>% mutate(
+                      AUC_clinvar= NA,
+                      sens_clinvar=NA,
+                      spec_clinvar=NA,
+                      confusion.matrix_roc_clinvar = "")
+}
+
+metrics <- metrics %>% mutate(
+                      N_HDR = N_HDR, 
+                      AUC_HDR=AUC_HDR,
+                      sens_HDR=sens_HDR,
+                      spec_HDR=spec_HDR,
+                      confusion.matrix_roc_HDR = confusion.matrix_roc_HDR
+                      )
+
+
+write.csv(metrics, paste0(params$Output_dir, Gene, "_", Ratio, "_", params$vset,"_", params$loessSubset, "_", params$EventCount_Filter, "_", params$Score_method, "_", (paste0(ifelse(Lab_curation == "No", "without", "with"), "_LabCureation_")), "E", gsub(", ", "", Exons), "_MM_", params$MM, "_Outlierremove_",  params$Outlierremove, "_extrafilter_", extraFilter, "_metrics.csv"), row.names = FALSE)
+
+```
